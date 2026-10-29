@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────
+# Buildr — Netlify deployment config
+# Deploy: netlify deploy --prod
+# Or connect the repo in the Netlify dashboard.
+# ─────────────────────────────────────────────────────────────────
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--legacy-peer-deps"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Next.js plugin (auto-detected by Netlify, but explicit for clarity)
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# API routes need extended timeout (default is 10s, we need 60s for LLM calls)
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["src/**/*"]
+
+# Redirect rules for the gateway (XTransformPort pattern)
+# Not needed on Netlify since all services run as functions.
+
+# Headers for API routes (no caching)
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-store"

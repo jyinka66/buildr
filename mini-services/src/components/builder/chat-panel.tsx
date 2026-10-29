@@ -1,0 +1,323 @@
+'use client'
+
+// Left conversation panel. Renders the chat history (user messages right,
+// assistant messages left with markdown + file-op badges + provider meta),
+// an inline error alert with retry hint, an empty-state with example
+// prompts, and a sticky composer (textarea + send button) at the bottom.
+// Enter sends, Shift+Enter inserts a newline. All state is read from the
+// builder store; `onSend` is provided by the parent.
+
+import * as React from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import ReactMarkdown from 'react-markdown'
+import {
+  AlertTriangle,
+  Bot,
+  Clock,
+  FileCode,
+  FilePlus,
+  FilePen,
+  Send,
+  Sparkles,
+  Trash2,
+  User,
+  Zap,
+} from 'lucide-react'
+import { useBuilder } from '@/lib/store'
+import { Textarea } from '@/components/ui/textarea'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import type { FileOp, GenerationView, ProviderConfig } from '@/lib/types'
+import { cn } from '@/lib/utils'
+
+type ProviderWithKey = ProviderConfig & { hasKey: boolean }
+
+const EXAMPLE_PROMPTS = [
+  'Add a login page with email + password',
+  'Create a products list with search and filter',
+  'Generate a dashboard with charts and KPI cards',
+  'Add a settings page with theme switcher',
+]
+
+function FileOpBadge({ op }: { op: FileOp }) {
+  const isCreate = op.action === 'create'
+  const isUpdate = op.action === 'update'
+  const isDelete = op.action === 'delete'
+  const label = isCreate ? 'created' : isUpdate ? 'updated' : isDelete ? 'deleted' : 'touched'
+  const Icon = isCreate ? FilePlus : isUpdate ? FilePen : isDelete ? Trash2 : FileCode
+  return (
+    <Badge
+      key={`${op.action}-${op.path}`}
+      variant="secondary"
+      className="gap-1 font-normal text-muted-foreground"
+    >
+      <Icon className="h-3 w-3" />
+      <span className="truncate font-mono text-[11px]">{label} {op.path}</span>
+    </Badge>
+  )
+}
+
+function MessageBubble({ msg, providers, streaming, streamingActive }: { msg: GenerationView; providers: ProviderWithKey[]; streaming?: boolean; streamingActive?: boolean }) {
+  const isUser = msg.role === 'user'
+  const isAssistant = msg.role === 'assistant'
+  const provider = msg.providerId
+    ? providers.find((p) => p.id === msg.providerId)
+    : null
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18 }}
+      className={cn('flex w-full gap-2', isUser ? 'justify-end' : 'justify-start')}
+    >
+      {isAssistant ? (
+        <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+          <Bot className={cn('h-4 w-4', streaming && 'animate-pulse')} />
+        </div>
+      ) : null}
+      <div className={cn('flex max-w-[85%] flex-col gap-1.5', isUser ? 'items-end' : 'items-start')}>
+        {streaming ? (
+          // "thinking…" indicator while the first token hasn't arrived yet.
+          <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.2s]" />
+              <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.1s]" />
+              <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500" />
+              <span className="ml-1.5">thinking…</span>
+            </span>
+          </div>
+        ) : (
+          <div
+            className={cn(
+              'rounded-lg px-3 py-2 text-sm leading-relaxed',
+              isUser
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-muted text-foreground',
+            )}
+          >
+            {isAssistant ? (
+              <div className="prose prose-sm dark:prose-invert max-w-none break-words [&>p]:m-0 [&>pre]:rounded-md [&>pre]:bg-zinc-950 [&>pre]:p-3 [&>code]:rounded [&>code]:bg-zinc-950/60 [&>code]:px-1 [&>code]:py-0.5 [&>code]:text-xs">
+                <ReactMarkdown>{msg.content || ''}</ReactMarkdown>
+                {streamingActive ? (
+                  <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-emerald-500 align-middle" />
+                ) : null}
+              </div>
+            ) : (
+              <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+            )}
+          </div>
+        )}
+
+        {isAssistant && !streaming && msg.fileOps.length > 0 ? (
+          <div className="flex flex-wrap gap-1 pl-0.5">
+            {msg.fileOps.map((op) => (
+              <FileOpBadge key={`${op.action}-${op.path}`} op={op} />
+            ))}
+          </div>
+        ) : null}
+
+        {isAssistant && !streaming ? (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-0.5 text-[11px] text-muted-foreground">
+            {provider ? (
+              <span className="inline-flex items-center gap-1">
+                <span
+                  className={cn(
+                    'h-1.5 w-1.5 rounded-full',
+                    provider.health === 'healthy' ? 'bg-emerald-500' : provider.health === 'degraded' ? 'bg-amber-500' : 'bg-zinc-400',
+                  )}
+                />
+                {provider.name}
+              </span>
+            ) : null}
+            {msg.tokens > 0 ? (
+              <span className="inline-flex items-center gap-0.5">
+                <Zap className="h-3 w-3" /> {msg.tokens} tok
+              </span>
+            ) : null}
+            {msg.durationMs > 0 ? (
+              <span className="inline-flex items-center gap-0.5">
+                <Clock className="h-3 w-3" /> {(msg.durationMs / 1000).toFixed(1)}s
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {isUser ? (
+        <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary/15 text-primary">
+          <User className="h-4 w-4" />
+        </div>
+      ) : null}
+    </motion.div>
+  )
+}
+
+export interface ChatPanelProps {
+  onSend: (msg: string) => void
+}
+
+export function ChatPanel({ onSend }: ChatPanelProps) {
+  const generations = useBuilder((s) => s.generations)
+  const generating = useBuilder((s) => s.generating)
+  const generatingError = useBuilder((s) => s.generatingError)
+  const providers = useBuilder((s) => s.providers)
+  const generate = useBuilder((s) => s.generate)
+
+  const [input, setInput] = React.useState('')
+  const scrollRef = React.useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to bottom when generations or generating changes.
+  React.useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [generations, generating])
+
+  const send = React.useCallback(
+    (value: string) => {
+      const trimmed = value.trim()
+      if (!trimmed || generating) return
+      onSend(trimmed)
+      setInput('')
+    },
+    [generating, onSend],
+  )
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      send(input)
+    }
+  }
+
+  const retry = () => {
+    const lastUser = [...generations].reverse().find((g) => g.role === 'user')
+    if (lastUser) void generate(lastUser.content)
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+        <Sparkles className="h-4 w-4 text-emerald-600" />
+        <span className="text-sm font-medium">Chat</span>
+        <span className="ml-auto text-[11px] text-muted-foreground">{generations.length} msgs</span>
+      </div>
+
+      {/* Messages */}
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
+        <div className="flex flex-col gap-3 p-4">
+          {generations.length === 0 && !generating ? (
+            <EmptyState onPick={(p) => send(p)} />
+          ) : (
+            <AnimatePresence initial={false}>
+              {generations.map((g) => (
+                <MessageBubble
+                  key={g.id}
+                  msg={g}
+                  providers={providers}
+                  streaming={generating && g.content.length === 0 && g.role === 'assistant' && g.id === generations[generations.length - 1]?.id}
+                  streamingActive={generating && g.role === 'assistant' && g.content.length > 0 && g.id === generations[generations.length - 1]?.id}
+                />
+              ))}
+              {generating && generations[generations.length - 1]?.role !== 'assistant' ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                >
+                  <Bot className="h-4 w-4 animate-pulse" />
+                  <span className="inline-flex items-center gap-1">
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.2s]" />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.1s]" />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500" />
+                    <span className="ml-1">thinking…</span>
+                  </span>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          )}
+        </div>
+      </div>
+
+      {/* Error */}
+      {generatingError ? (
+        <div className="border-t border-border px-3 pt-2">
+          <Alert variant="destructive" className="py-2">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle className="text-xs">Generation failed</AlertTitle>
+            <AlertDescription className="flex items-center justify-between gap-2 text-xs">
+              <span className="min-w-0 truncate">{generatingError}</span>
+              <Button size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={retry}>
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+
+      {/* Composer */}
+      <div className="sticky bottom-0 border-t border-border bg-background p-3">
+        <div className="relative">
+          <Textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Describe a feature or change…  (Enter to send · Shift+Enter for newline)"
+            disabled={generating}
+            rows={2}
+            className="min-h-[2.75rem] resize-none pr-12 text-sm leading-relaxed"
+          />
+          <Button
+            type="button"
+            size="icon"
+            className="absolute right-1.5 bottom-1.5 h-7 w-7"
+            onClick={() => send(input)}
+            disabled={generating || !input.trim()}
+            aria-label="Send message"
+          >
+            {generating ? (
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="flex h-full flex-col items-center justify-center gap-3 px-2 py-8 text-center"
+    >
+      <div className="grid h-10 w-10 place-items-center rounded-full bg-emerald-600/10 text-emerald-600">
+        <Sparkles className="h-5 w-5" />
+      </div>
+      <div>
+        <p className="text-sm font-medium">Start building with a prompt</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Describe what you want and Buildr will generate the code.
+        </p>
+      </div>
+      <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+        {EXAMPLE_PROMPTS.map((p) => (
+          <button
+            key={p}
+            onClick={() => onPick(p)}
+            className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-emerald-500/40 hover:text-foreground"
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+    </motion.div>
+  )
+}

@@ -1,0 +1,48 @@
+# Build dependencies
+node_modules
+.next
+out
+build
+dist
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+dev.log
+server.log
+
+# Docker
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+
+# Version control
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Mini-services (built separately)
+mini-services/*/node_modules
+mini-services/*/dist
+
+# Misc
+*.md
+!README.md
+tests/
+examples/
+skills/
+tool-results/
+download/
+db/
