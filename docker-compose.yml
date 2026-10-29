@@ -1,0 +1,116 @@
+# ─────────────────────────────────────────────────────────────────
+# Buildr — docker-compose.yml (all 3 services)
+# Run: docker compose up -d
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  # ── Main Next.js app (port 3000) ──────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXTAUTH_URL=${NEXTAUTH_URL:?Set NEXTAUTH_URL to the public HTTPS app URL}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET}
+      - SIDECAR_URL=http://api-runtime:3030
+      - SIDECAR_AUTH_TOKEN=${SIDECAR_AUTH_TOKEN:?Set a random SIDECAR_AUTH_TOKEN of at least 32 characters}
+      - PAYSTACK_SECRET_KEY=${PAYSTACK_SECRET_KEY:-}
+      - SUPABASE_URL=${SUPABASE_URL:?Set SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?Set ENCRYPTION_KEY to 64 hex characters}
+      - ALLOWED_FRAME_ANCESTORS=${ALLOWED_FRAME_ANCESTORS:-'self'}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - EMAIL_FROM=${EMAIL_FROM:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:?Set ALLOWED_ORIGINS to the public app origin}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      api-runtime:
+        condition: service_started
+      collab-service:
+        condition: service_started
+
+  # ── API runtime sidecar (port 3030) ────────────────────────────
+  # Executes generated API route handlers in real-time.
+  api-runtime:
+    build:
+      context: ./mini-services/api-runtime
+      dockerfile: Dockerfile
+    image: buildr-sandbox:local
+    expose:
+      - "3030"
+    environment:
+      - NODE_ENV=production
+      - SIDECAR_AUTH_TOKEN=${SIDECAR_AUTH_TOKEN:?Set a random SIDECAR_AUTH_TOKEN of at least 32 characters}
+      - SANDBOX_RUNNER_URL=http://sandbox-runner:3031
+      - SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN:?Set a random SANDBOX_RUNNER_TOKEN of at least 32 characters}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3030/__health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      sandbox-runner:
+        condition: service_healthy
+
+  # ── Disposable generated-code sandbox orchestrator ─────────────────
+  # This service alone can access the Docker daemon to create one-off sandbox
+  # containers. It is internal-only and accepts a fixed payload schema, never
+  # arbitrary Docker options or commands. Keep it on a dedicated host in high-
+  # assurance deployments because Docker daemon access is host-privileged.
+  sandbox-runner:
+    image: buildr-sandbox:local
+    command: ["bun", "run", "sandbox-runner.ts"]
+    user: "0:0"
+    expose:
+      - "3031"
+    environment:
+      - NODE_ENV=production
+      - PORT=3031
+      - SANDBOX_RUNNER_PORT=3031
+      - SANDBOX_RUNNER_TOKEN=${SANDBOX_RUNNER_TOKEN:?Set a random SANDBOX_RUNNER_TOKEN of at least 32 characters}
+      - SANDBOX_IMAGE=buildr-sandbox:local
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3031/__health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Collaboration WebSocket service (port 3004) ────────────────
+  # Real-time cursor + presence + chat for shared editing.
+  collab-service:
+    build:
+      context: ./mini-services/collab-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=production
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET}
+      - SUPABASE_URL=${SUPABASE_URL:?Set SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:?Set ALLOWED_ORIGINS to the public app origin}
+    ports:
+      - "3004:3004"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3004/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
