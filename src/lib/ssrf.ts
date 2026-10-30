@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
+import { Agent } from 'undici'
 
 export interface SsrfCheckResult {
   ok: boolean
