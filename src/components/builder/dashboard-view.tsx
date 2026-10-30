@@ -348,7 +348,11 @@ function ProjectCard({
         projects: state.projects.map((item) => item.id === project.id ? { ...item, isPublic: result.isPublic } : item),
       }))
       if (result.isPublic && result.shareUrl && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        try { await navigator.clipboard.writeText(result.shareUrl) } catch { /* sharing succeeded; clipboard may be unavailable */ }
+        try {
+          await navigator.clipboard.writeText(result.shareUrl)
+        } catch {
+          window.prompt('Copy your public project link', result.shareUrl)
+        }
       }
     } catch (error) {
       setShareError(error instanceof Error ? error.message : 'Could not update public sharing.')
