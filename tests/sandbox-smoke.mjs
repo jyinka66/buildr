@@ -16,7 +16,7 @@ test('production runtime routes generated source only to the isolated runner and
 })
 
 test('sandbox runner enforces disposable no-network container and resource restrictions', () => {
-  for (const control of ['-i', '--rm', '--network=none', '--read-only', '--user=1001:1001', '--memory=128m', '--cpus=0.50', '--pids-limit=32', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--ulimit=nofile=64:64', 'TIMEOUT_MS']) {
+  for (const control of ['-i', '--rm', '--network=none', '--read-only', '--user=1001:1001', '--memory=256m', '--cpus=0.50', '--pids-limit=32', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--ulimit=nofile=64:64', 'TIMEOUT_MS']) {
     assert.ok(runner.includes(control), `missing sandbox control: ${control}`)
   }
   assert.match(runner, /docker\(\['kill', id\]/)

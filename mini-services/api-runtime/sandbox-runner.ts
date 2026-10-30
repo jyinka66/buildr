@@ -74,7 +74,7 @@ const server = Bun.serve({ port: PORT, async fetch(req) {
     }
     const result = await docker([
       'run', '-i', '--rm', '--name', id, '--pull=missing', '--network=none', '--read-only', '--user=1001:1001',
-      '--memory=128m', '--memory-swap=128m', '--cpus=0.50', '--pids-limit=32', '--ipc=private',
+      '--memory=256m', '--memory-swap=256m', '--cpus=0.50', '--pids-limit=32', '--ipc=private',
       '--cap-drop=ALL', '--security-opt=no-new-privileges:true',
       '--ulimit=nofile=64:64', '--ulimit=fsize=1048576:1048576', '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=8m,uid=1001,gid=1001',
       '--env=NODE_ENV=production', IMAGE, 'bun', 'run', '/app/sandbox-worker.ts'

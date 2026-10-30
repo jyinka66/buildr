@@ -9,7 +9,7 @@ Each execution container has:
 - no network (`--network=none`), no host mounts, and no Docker socket;
 - a read-only root filesystem and a small no-exec `/tmp` tmpfs;
 - a non-root UID, dropped Linux capabilities, default seccomp, and no-new-privileges;
-- 128 MiB memory, 0.5 CPU, 32 process limit, bounded file descriptors/output, and a 12-second orchestration deadline;
+- 256 MiB memory, 0.5 CPU, 32 process limit, bounded file descriptors/output, and a 12-second orchestration deadline;
 - no application, Supabase, payment, email, OAuth, or runner secrets. Integrations are explicit non-networking mocks that fail closed for external side effects.
 
 The orchestrator accepts only `/execute` JSON payloads. Callers cannot choose the image, command, mounts, environment, network, or Docker flags. It is not exposed on a host port.
