@@ -41,7 +41,7 @@ export const authOptions: NextAuthOptions = {
         if (!email || !password) return null
 
         // Limit repeated guesses for the same normalized account identifier.
-        // This is process-local; use a shared store for multi-instance deployments.
+        // The counter is stored in Postgres so attempts are shared across app instances.
         const loginAttempt = await distributedRateLimit(`login:${email}`, { limit: 10, windowMs: 15 * 60 * 1000 })
         if (!loginAttempt.ok) return null
 
