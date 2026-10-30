@@ -32,21 +32,28 @@ export async function POST(
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  const body = await req.json().catch(() => ({}))
-  const enable = body.enable !== false
+  const body = await req.json().catch(() => null)
+  if (body !== null && (typeof body !== 'object' || Array.isArray(body) || (body.enable !== undefined && typeof body.enable !== 'boolean'))) {
+    return NextResponse.json({ error: 'invalid_request' }, { status: 400 })
+  }
+  const enable = body?.enable === true
 
   let shareSlug = project.share_slug
   if (enable && !shareSlug) {
-    shareSlug = randomBytes(8).toString('hex')
+    shareSlug = randomBytes(16).toString('hex')
   }
   if (!enable) {
     shareSlug = null
   }
 
-  await db
+  const { error: updateError } = await db
     .from('projects')
     .update({ is_public: enable, share_slug: shareSlug })
     .eq('id', id)
+    .eq('owner_id', user.id)
+  if (updateError) {
+    return NextResponse.json({ error: 'share_update_failed' }, { status: 500 })
+  }
 
   await audit(
     enable ? 'project.share_enabled' : 'project.share_disabled',
