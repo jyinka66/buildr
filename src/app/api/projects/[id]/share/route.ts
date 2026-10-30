@@ -33,10 +33,10 @@ export async function POST(
   }
 
   const body = await req.json().catch(() => null)
-  if (body !== null && (typeof body !== 'object' || Array.isArray(body) || (body.enable !== undefined && typeof body.enable !== 'boolean'))) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.enable !== 'boolean') {
     return NextResponse.json({ error: 'invalid_request' }, { status: 400 })
   }
-  const enable = body?.enable === true
+  const enable = body.enable
 
   let shareSlug = project.share_slug
   if (enable && !shareSlug) {
