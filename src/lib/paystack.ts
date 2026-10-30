@@ -8,8 +8,12 @@ function getSecretKey(): string {
   if (!key || key === 'your-paystack-secret-key' || key === 'sk_test_xxx') {
     throw new Error('PAYSTACK_NOT_CONFIGURED')
   }
-  if (process.env.NODE_ENV === 'production' && !key.startsWith('sk_live_')) {
-    throw new Error('PAYSTACK_LIVE_KEY_REQUIRED')
+  const configuredMode = process.env.PAYSTACK_MODE?.trim().toLowerCase()
+  const mode = configuredMode || (process.env.NODE_ENV === 'production' ? 'live' : 'test')
+  if (mode !== 'test' && mode !== 'live') throw new Error('PAYSTACK_MODE_INVALID')
+  const requiredPrefix = mode === 'test' ? 'sk_test_' : 'sk_live_'
+  if (!key.startsWith(requiredPrefix)) {
+    throw new Error(mode === 'test' ? 'PAYSTACK_TEST_KEY_REQUIRED' : 'PAYSTACK_LIVE_KEY_REQUIRED')
   }
   return key
 }
