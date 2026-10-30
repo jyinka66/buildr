@@ -71,6 +71,15 @@ export const api = {
     return json(res)
   },
 
+  async setProjectPublic(id: string, enable: boolean): Promise<{ isPublic: boolean; shareSlug: string | null; shareUrl: string | null }> {
+    const res = await fetch(`/api/projects/${encodeURIComponent(id)}/share`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enable }),
+    })
+    return json(res)
+  },
+
   async deleteProject(id: string): Promise<void> {
     await fetch(`/api/projects/${id}`, { method: 'DELETE' })
   },
