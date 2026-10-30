@@ -27,26 +27,76 @@ async function resolvePublicAddress(hostnameInput: string): Promise<AddressRecor
   return records[0]
 }
 
-async function bodyToBuffer(body: BodyInit | null | undefined): Promise<Buffer | undefined> {
+const MAX_REQUEST_BODY_BYTES = 1_048_576
+
+function ensureBodyWithinLimit(body: Buffer): Buffer {
+  if (body.byteLength > MAX_REQUEST_BODY_BYTES) {
+    throw new Error('safe_fetch_request_body_too_large')
+  }
+  return body
+}
+
+async function readWithAbort(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal?: AbortSignal | null,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (!signal) return reader.read()
+  if (signal.aborted) throw new Error('safe_fetch_aborted')
+
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      void reader.cancel(signal.reason).catch(() => {})
+      reject(new Error('safe_fetch_aborted'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([reader.read(), aborted])
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+  }
+}
+
+async function bodyToBuffer(
+  body: BodyInit | null | undefined,
+  signal?: AbortSignal | null,
+): Promise<Buffer | undefined> {
   if (body == null) return undefined
-  if (typeof body === 'string') return Buffer.from(body)
-  if (body instanceof URLSearchParams) return Buffer.from(body.toString())
-  if (body instanceof ArrayBuffer) return Buffer.from(body)
-  if (ArrayBuffer.isView(body)) return Buffer.from(body.buffer, body.byteOffset, body.byteLength)
-  if (typeof Blob !== 'undefined' && body instanceof Blob) return Buffer.from(await body.arrayBuffer())
+  if (signal?.aborted) throw new Error('safe_fetch_aborted')
+  if (typeof body === 'string') return ensureBodyWithinLimit(Buffer.from(body))
+  if (body instanceof URLSearchParams) return ensureBodyWithinLimit(Buffer.from(body.toString()))
+  if (body instanceof ArrayBuffer) {
+    if (body.byteLength > MAX_REQUEST_BODY_BYTES) throw new Error('safe_fetch_request_body_too_large')
+    return Buffer.from(body)
+  }
+  if (ArrayBuffer.isView(body)) {
+    if (body.byteLength > MAX_REQUEST_BODY_BYTES) throw new Error('safe_fetch_request_body_too_large')
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength)
+  }
+  if (typeof Blob !== 'undefined' && body instanceof Blob) {
+    if (body.size > MAX_REQUEST_BODY_BYTES) throw new Error('safe_fetch_request_body_too_large')
+    return Buffer.from(await body.arrayBuffer())
+  }
   if (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream) {
     const reader = body.getReader()
     const chunks: Buffer[] = []
+    let totalBytes = 0
     try {
       for (;;) {
-        const item = await reader.read()
+        const item = await readWithAbort(reader, signal)
         if (item.done) break
+        totalBytes += item.value.byteLength
+        if (totalBytes > MAX_REQUEST_BODY_BYTES) {
+          await reader.cancel().catch(() => {})
+          throw new Error('safe_fetch_request_body_too_large')
+        }
         chunks.push(Buffer.from(item.value))
       }
     } finally {
       reader.releaseLock()
     }
-    return Buffer.concat(chunks)
+    return Buffer.concat(chunks, totalBytes)
   }
   // Never fall back to global fetch for an unsupported body: that would lose
   // the DNS pin and reintroduce the rebinding vulnerability.
@@ -79,7 +129,7 @@ export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promi
     if (signal && abortDns) signal.removeEventListener('abort', abortDns)
   })
   if (signal?.aborted) throw new Error('safe_fetch_aborted')
-  const body = await bodyToBuffer(init.body)
+  const body = await bodyToBuffer(init.body, signal)
   const headers = new Headers(init.headers)
   // Let Node build Host from the validated URL authority, not a caller header.
   headers.delete('host')
