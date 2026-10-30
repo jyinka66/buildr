@@ -103,7 +103,7 @@ export async function trackUsage(
     const { error } = await db.from('usage_events').insert({
       owner_id: userId, metric, quantity,
       project_id: metadata?.projectId || null,
-      metadata: cleanMetadata,
+      metadata: JSON.stringify(cleanMetadata),
     })
     if (error) console.error('[Buildr] trackUsage insert failed:', error.message)
     return !error
