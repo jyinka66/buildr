@@ -9,7 +9,7 @@ const BLOCKED = [
 ]
 
 function privateAddress(address: string): boolean {
-  return isBlockedIp(address)
+  return isBlockedIp(address) || BLOCKED.some(pattern => pattern.test(address))
 }
 
 /** Creates a one-request dispatcher pinned to a checked public DNS answer. */
