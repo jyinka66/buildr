@@ -55,3 +55,10 @@ test('webhook delivery reads only a bounded response snippet', () => {
   assert.ok(source.includes('readBoundedResponse(res)'), 'response bodies must not be buffered without a limit')
   assert.ok(source.includes('reader.cancel()'), 'oversized responses should be cancelled')
 })
+
+
+test('production database access fails closed instead of using the in-memory demo store', () => {
+  const source = readFileSync(new URL('../src/lib/supabase-server.ts', import.meta.url), 'utf8')
+  assert.ok(source.includes("process.env.NODE_ENV === 'production'"))
+  assert.ok(source.includes('throw new SupabaseNotConfiguredError()'))
+})
