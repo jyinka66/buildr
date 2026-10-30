@@ -12,7 +12,6 @@
 // UI; their HTTP integration is implemented in `providerRunner` so that
 // when a user supplies an API key, routing to that provider works for real.
 
-import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
 import type {
   ProviderConfig,
@@ -43,7 +42,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     speciality: 'code',
     weight: 10,
     description:
-      'Built-in model backed by z-ai-web-dev-sdk. Used by default for code generation, schema design and docs. No API key required.',
+      'Z.ai GLM API using a server-side API key configured by the Buildr operator.',
   },
   {
     key: 'anthropic',
@@ -177,10 +176,14 @@ export async function loadProviders(): Promise<ProviderConfig[]> {
     id: r.id,
     key: r.key as ProviderKey,
     name: r.name,
-    model: r.model,
-    apiKey: r.api_key,
-    baseUrl: r.base_url,
-    enabled: r.enabled,
+    model: r.key === 'zai' ? (process.env.ZAI_MODEL || process.env.BUILDR_LLM_MODEL || r.model || 'glm-4.6') : r.model,
+    apiKey: r.key === 'zai'
+      ? (process.env.ZAI_API_KEY || process.env.BUILDR_LLM_API_KEY || (r.api_key === '(managed)' ? '' : r.api_key))
+      : r.api_key,
+    baseUrl: r.key === 'zai'
+      ? (process.env.ZAI_BASE_URL || process.env.BUILDR_LLM_BASE_URL || r.base_url || 'https://api.z.ai/api/paas/v4')
+      : r.base_url,
+    enabled: r.enabled || (r.key === 'zai' && Boolean(process.env.ZAI_API_KEY || process.env.BUILDR_LLM_API_KEY)),
     weight: r.weight,
     speciality: r.speciality as TaskKind,
     health: r.health as 'healthy' | 'degraded' | 'down',
@@ -191,7 +194,7 @@ export async function loadProviders(): Promise<ProviderConfig[]> {
 // ---------------------------------------------------------------------------
 // Router: select the best provider for a task.
 // Honours an explicit override, then speciality match, then weight.
-// Only healthy & enabled providers are eligible; `zai` is always eligible.
+// Only enabled, healthy, and credentialed providers are eligible.
 // ---------------------------------------------------------------------------
 
 export async function selectProvider(
@@ -201,7 +204,7 @@ export async function selectProvider(
   const providers = await loadProviders()
   const ranked = rankProviders(providers, task, overrideKey)
   if (!ranked.length) {
-    throw new Error('No configured LLM providers available. Configure a provider API key or enable the built-in Z.ai provider.')
+    throw new Error('No AI provider is configured. Add ZAI_API_KEY to the Buildr server environment (recommended), or configure an API key in Settings → LLM Providers.')
   }
   return ranked[0]
 }
@@ -244,29 +247,6 @@ export interface CompletionResult {
 }
 
 // ---------------------------------------------------------------------------
-// Built-in `zai` runner. Uses z-ai-web-dev-sdk. System prompt is delivered
-// as an `assistant` message per the SDK convention.
-// ---------------------------------------------------------------------------
-
-async function runZai(
-  messages: ChatMessage[],
-): Promise<string> {
-  const zai = await ZAI.create()
-  const sdkMessages = messages.map((m) =>
-    m.role === 'system'
-      ? { role: 'assistant' as const, content: m.content }
-      : { role: m.role as 'user' | 'assistant', content: m.content },
-  )
-  // The z-ai-web-dev-sdk supports messages + thinking. We keep the call
-  // minimal to avoid runtime rejections on unknown fields.
-  const completion = await zai.chat.completions.create({
-    messages: sdkMessages,
-    thinking: { type: 'disabled' },
-  })
-  return completion.choices[0]?.message?.content ?? ''
-}
-
-// ---------------------------------------------------------------------------
 // Generic OpenAI-compatible runner for openai / deepseek / ollama / google
 // (Gemini's OpenAI-compat endpoint). Anthropic uses a different schema but we
 // route it through its native messages API. This keeps the architecture
@@ -284,7 +264,9 @@ async function runOpenAICompat(
 ): Promise<string> {
   const base =
     provider.baseUrl ||
-    (provider.key === 'openai'
+    (provider.key === 'zai'
+      ? 'https://api.z.ai/api/paas/v4'
+      : provider.key === 'openai'
       ? 'https://api.openai.com/v1'
       : provider.key === 'deepseek'
         ? 'https://api.deepseek.com'
@@ -349,10 +331,9 @@ async function runWithProvider(
   options: CompletionOptions,
   provider: ProviderConfig,
 ): Promise<string> {
-  if (provider.key === 'zai') return runZai(messages)
-  if (!provider.apiKey || provider.apiKey.trim() === '') {
+  if (!provider.apiKey || provider.apiKey.trim() === '' || provider.apiKey === '(managed)') {
     throw new Error(
-      `Provider "${provider.name}" has no API key configured. Add one in Settings → LLM Providers, or use the built-in Z.ai provider.`,
+      `Provider "${provider.name}" has no API key configured. Add a server-side key in Render or configure it in Settings → LLM Providers.`,
     )
   }
   return runOpenAICompat(messages, options, provider)
@@ -418,51 +399,6 @@ export type StreamEvent =
   | { type: 'status'; message: string }
   | { type: 'done'; provider: ProviderConfig; tokens: number; durationMs: number; fullContent: string }
   | { type: 'error'; message: string }
-
-// Stream from the built-in zai provider (z-ai-web-dev-sdk with stream:true).
-async function* runZaiStream(messages: ChatMessage[]): AsyncGenerator<string> {
-  const zai = await ZAI.create()
-  const sdkMessages = messages.map((m) =>
-    m.role === 'system'
-      ? { role: 'assistant' as const, content: m.content }
-      : { role: m.role as 'user' | 'assistant', content: m.content },
-  )
-  const response = await zai.chat.completions.create({
-    messages: sdkMessages,
-    thinking: { type: 'disabled' },
-    stream: true,
-  })
-
-  // The SDK returns a ReadableStream in SSE format when stream:true.
-  if (response && typeof response.getReader === 'function') {
-    const reader = response.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6).trim()
-          if (data === '' || data === '[DONE]') continue
-          try {
-            const json = JSON.parse(data)
-            const delta = json.choices?.[0]?.delta?.content
-            if (delta) yield delta
-          } catch {
-            // Skip malformed lines.
-          }
-        }
-      }
-    }
-  } else {
-    // Fallback: if the SDK didn't return a stream, treat as a normal response.
-    yield response.choices[0]?.message?.content ?? ''
-  }
-}
 
 // Stream from an OpenAI-compatible provider (fetch with stream:true).
 async function* runOpenAICompatStream(
@@ -601,9 +537,7 @@ export async function* completeStream(
     const start = Date.now()
     let fullContent = ''
     try {
-      const tokenStream = provider.key === 'zai'
-        ? runZaiStream(messages)
-        : runOpenAICompatStream(messages, options, provider)
+      const tokenStream = runOpenAICompatStream(messages, options, provider)
 
       for await (const token of tokenStream) {
         fullContent += token
