@@ -16,7 +16,7 @@ import type {
 } from '@/lib/types'
 
 export type View = 'landing' | 'dashboard' | 'builder' | 'settings' | 'business' | 'godmode' | 'billing' | 'marketing' | 'support' | 'ops' | 'notifications' | 'api-keys' | 'webhooks' | 'workspaces' | 'admin' | 'onboarding' | 'jobs' | 'analytics' | 'shared' | 'chat'
-export type AuthMode = 'login' | 'register'
+export type AuthMode = 'login' | 'register' | 'forgot' | 'reset'
 // How the project chat treats a message: let the AI decide (auto), only talk
 // (chat), or always build (build — the original behaviour).
 export type ChatMode = 'auto' | 'chat' | 'build'
@@ -78,6 +78,15 @@ interface BuilderState {
   twoFactorPassword: string
   completeTwoFactor: (code: string) => Promise<boolean>
   cancelTwoFactor: () => void
+  // Account recovery + verification
+  authNotice: string | null
+  unverifiedEmail: string | null
+  resetToken: string | null
+  forgotPassword: (email: string) => Promise<boolean>
+  openReset: (token: string) => void
+  resetPassword: (password: string) => Promise<boolean>
+  resendVerification: () => Promise<boolean>
+  showAuthError: (message: string) => void
   finishLogin: () => Promise<boolean>
   // Onboarding
   onboardingRequired: boolean
@@ -118,6 +127,24 @@ async function getCsrf(): Promise<string> {
   return (data as { csrfToken?: string }).csrfToken ?? ''
 }
 
+// User-facing text for the error codes returned by credentials sign-in.
+export const AUTH_MESSAGES: Record<string, string> = {
+  CredentialsSignin: 'Invalid email or password.',
+  EmailNotVerified: 'Your email is not verified yet. Check your inbox for the confirmation link.',
+  AccountDisabled: 'This account has been disabled. Contact support if you think this is a mistake.',
+  RateLimited: 'Too many attempts. Please wait a few minutes and try again.',
+  TwoFactorRequired: 'Enter the 6-digit code from your authenticator app.',
+  InvalidTotp: 'That code is not valid. Check your authenticator app or use a backup code.',
+  OAuthSignin: 'Could not start sign-in with that provider.',
+  OAuthCallback: 'Sign-in with that provider failed. Please try again.',
+  OAuthAccountNotLinked: 'That email is already registered with a different sign-in method.',
+  AccessDenied: 'Sign-in was refused. The provider email must be verified and the account must be active.',
+  Configuration: 'Sign-in is not configured correctly on the server.',
+}
+export function authMessage(code?: string): string {
+  return (code && AUTH_MESSAGES[code]) || AUTH_MESSAGES.CredentialsSignin
+}
+
 export const useBuilder = create<BuilderState>((set, get) => ({
   view: 'landing',
   session: null,
@@ -129,6 +156,9 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   twoFactorRequired: false,
   twoFactorEmail: '',
   twoFactorPassword: '',
+  authNotice: null,
+  unverifiedEmail: null,
+  resetToken: null,
   onboardingRequired: false,
   onboardingStep: 'welcome',
   projects: [],
@@ -210,15 +240,20 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   },
 
   openAuth(mode) {
-    set({ authOpen: true, authMode: mode, authError: null })
+    set({ authOpen: true, authMode: mode, authError: null, authNotice: null, unverifiedEmail: null })
   },
 
   closeAuth() {
-    set({ authOpen: false, authError: null })
+    set({ authOpen: false, authError: null, authNotice: null, unverifiedEmail: null, resetToken: null, twoFactorRequired: false, twoFactorEmail: '', twoFactorPassword: '' })
   },
 
   setAuthMode(mode) {
-    set({ authMode: mode, authError: null })
+    set({ authMode: mode, authError: null, authNotice: null, unverifiedEmail: null, twoFactorRequired: false, twoFactorEmail: '', twoFactorPassword: '' })
+  },
+
+  // Opens the dialog with a message, e.g. when an OAuth redirect comes back with an error.
+  showAuthError(message) {
+    set({ authOpen: true, authMode: 'login', authError: message, authNotice: null })
   },
 
   async register(input) {
@@ -239,19 +274,31 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   },
 
   async login(email, password) {
-    set({ authLoading: true, authError: null, twoFactorRequired: false })
+    set({ authLoading: true, authError: null, authNotice: null, unverifiedEmail: null, twoFactorRequired: false })
     try {
-      // Step 1: check if 2FA is required.
+      // Step 1: verify the password and learn whether 2FA is needed, or why the
+      // account cannot sign in yet (these are reported only after the password is right).
       const checkRes = await fetch('/api/auth/2fa/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) })
-      if (!checkRes.ok) { set({ authError: 'Invalid email or password.' }); return false }
-      const check = await checkRes.json()
+      if (!checkRes.ok) {
+        const data = (await checkRes.json().catch(() => ({}))) as { error?: string }
+        if (checkRes.status === 429) set({ authError: AUTH_MESSAGES.RateLimited })
+        else if (data.error === 'email_not_verified') set({ authError: AUTH_MESSAGES.EmailNotVerified, unverifiedEmail: email })
+        else if (data.error === 'account_disabled') set({ authError: AUTH_MESSAGES.AccountDisabled })
+        else if (checkRes.status >= 500) set({ authError: 'Sign-in is temporarily unavailable. Please try again.' })
+        else set({ authError: AUTH_MESSAGES.CredentialsSignin })
+        return false
+      }
+      const check = (await checkRes.json()) as { requires2fa?: boolean }
       if (check.requires2fa) {
         set({ twoFactorRequired: true, twoFactorEmail: email, twoFactorPassword: password, authLoading: false })
         return false
       }
       // Step 2: no 2FA → proceed with sign-in.
       const result = await api.signIn({ email, password })
-      if (!result.ok) { set({ authError: result.error ?? 'Login failed.' }); return false }
+      if (!result.ok) {
+        set({ authError: authMessage(result.error), unverifiedEmail: result.error === 'EmailNotVerified' ? email : null })
+        return false
+      }
       return await get().finishLogin()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'login_failed'
@@ -374,18 +421,72 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     if (!email || !password) return false
     set({ authLoading: true, authError: null })
     try {
-      const params = new URLSearchParams({ email, password, csrfToken: await getCsrf(), json: 'true', totpCode: code })
-      const res = await fetch('/api/auth/callback/credentials', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: params })
-      if (!res.ok) { set({ authError: 'Invalid 2FA code.' }); return false }
+      const result = await api.signIn({ email, password, totpCode: code.trim() })
+      if (!result.ok) {
+        // Stay on the code step so a mistyped code can be retried.
+        set({ authError: authMessage(result.error === 'CredentialsSignin' ? 'InvalidTotp' : result.error) })
+        return false
+      }
+      set({ twoFactorRequired: false, twoFactorEmail: '', twoFactorPassword: '' })
       await get().finishLogin()
       return true
-    } catch { set({ authError: 'Login failed.' }); return false }
-    finally { set({ authLoading: false, twoFactorRequired: false, twoFactorEmail: '', twoFactorPassword: '' }) }
+    } catch { set({ authError: 'Login failed. Please try again.' }); return false }
+    finally { set({ authLoading: false }) }
   },
 
   cancelTwoFactor() {
     set({ twoFactorRequired: false, twoFactorEmail: '', twoFactorPassword: '', authError: null })
   },
+  async forgotPassword(email) {
+    set({ authLoading: true, authError: null, authNotice: null })
+    try {
+      const res = await api.forgotPassword(email)
+      set({ authNotice: res.message })
+      return true
+    } catch (err) {
+      set({ authError: err instanceof Error ? err.message : 'Could not send the reset email.' })
+      return false
+    } finally {
+      set({ authLoading: false })
+    }
+  },
+
+  openReset(token) {
+    set({ authOpen: true, authMode: 'reset', resetToken: token, authError: null, authNotice: null })
+  },
+
+  async resetPassword(password) {
+    const token = get().resetToken
+    if (!token) { set({ authError: 'This reset link is missing its token. Request a new one.' }); return false }
+    set({ authLoading: true, authError: null, authNotice: null })
+    try {
+      const res = await api.resetPassword(token, password)
+      set({ authMode: 'login', resetToken: null, authNotice: res.message })
+      return true
+    } catch (err) {
+      set({ authError: err instanceof Error ? err.message : 'Could not reset the password.' })
+      return false
+    } finally {
+      set({ authLoading: false })
+    }
+  },
+
+  async resendVerification() {
+    const email = get().unverifiedEmail
+    if (!email) return false
+    set({ authLoading: true, authError: null, authNotice: null })
+    try {
+      const res = await api.resendVerification(email)
+      set({ authNotice: res.message, unverifiedEmail: null })
+      return true
+    } catch (err) {
+      set({ authError: err instanceof Error ? err.message : 'Could not resend the email.' })
+      return false
+    } finally {
+      set({ authLoading: false })
+    }
+  },
+
 
   async checkOnboarding() {
     try {

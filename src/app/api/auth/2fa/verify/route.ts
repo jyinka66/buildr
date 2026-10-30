@@ -2,11 +2,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireSessionUser } from '@/lib/session'
+import { distributedRateLimit } from '@/lib/distributed-rate-limit'
+import { rateLimitedResponse } from '@/lib/rate-limit'
 import { verifyCode, generateBackupCodes, hashBackupCode } from '@/lib/totp'
 
 export async function POST(req: NextRequest) {
   try {
     const user = await requireSessionUser()
+    const rl = await distributedRateLimit(`2fa-verify:${user.id}`, { limit: 10, windowMs: 15 * 60 * 1000 })
+    if (!rl.ok) return rateLimitedResponse(rl.resetMs)
     const { code } = await req.json()
     if (!code || !/^\d{6}$/.test(code)) return NextResponse.json({ error: '6-digit code required.' }, { status: 400 })
 
