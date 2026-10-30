@@ -29,6 +29,7 @@ test('SSRF transport pins outbound connections to validated public DNS answers',
   assert.ok(ssrfSource.includes("import { fetchWithPinnedAddress } from './ssrf-pinned.ts'"), 'safeFetch must use the pinned transport')
   assert.ok(ssrfSource.includes('await fetchWithPinnedAddress(current,'), 'every redirect hop must use the pinned transport')
   assert.ok(ssrfSource.includes("isUrlSafe(current.toString(), { resolveDns: false })"), 'safeFetch must avoid a separate unabortable DNS lookup')
+  assert.ok(ssrfSource.includes('retainTimeoutUntilBodyConsumed(response, cleanup)'), 'safeFetch timeout must cover the response body too')
   assert.ok(!ssrfSource.includes('await fetch(current,'), 'untrusted destinations must not use global fetch')
   assert.ok(pinnedSource.includes("lookup(hostname, { all: true, verbatim: true })"), 'transport must resolve all DNS answers')
   assert.ok(pinnedSource.includes('records.some((record) => isBlockedIp(record.address))'), 'transport must reject mixed public/private DNS answers')
