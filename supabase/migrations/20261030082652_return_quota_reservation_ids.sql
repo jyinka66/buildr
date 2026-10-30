@@ -1,0 +1,3 @@
+-- Compatibility marker for the already-applied remote migration.
+-- The final reserve_usage return shape (including reservation_id) is included
+-- in 20261030082610_atomic_quota_and_distributed_rate_limits.sql.
