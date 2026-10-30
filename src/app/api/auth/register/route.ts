@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
-import { rateLimit, trustedClientIp } from '@/lib/rate-limit'
+import { distributedRateLimit, trustedClientIp } from '@/lib/rate-limit'
 
 interface RegisterBody {
   email?: string
@@ -15,7 +15,7 @@ interface RegisterBody {
 export async function POST(req: NextRequest) {
   // Rate limit: 5 registrations per IP per 15 minutes.
   const ip = trustedClientIp(req.headers)
-  const rl = rateLimit(`register:${ip}`, { limit: 5, windowMs: 15 * 60 * 1000 })
+  const rl = await distributedRateLimit(`register:${ip}`, { limit: 5, windowMs: 15 * 60 * 1000 })
   if (!rl.ok) {
     return NextResponse.json(
       { error: 'rate_limited', retryAfterMs: rl.resetMs },
