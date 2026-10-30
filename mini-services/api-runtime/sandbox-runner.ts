@@ -57,8 +57,12 @@ const server = Bun.serve({ port: PORT, async fetch(req) {
   if (req.method !== 'POST' || url.pathname !== '/execute') return Response.json({ error: 'not_found' }, { status: 404 })
   const declared = Number(req.headers.get('content-length') || 0)
   if (declared > MAX_INPUT_BYTES) return Response.json({ error: 'payload_too_large' }, { status: 413 })
-  const raw = await req.text()
-  if (Buffer.byteLength(raw) > MAX_INPUT_BYTES) return Response.json({ error: 'payload_too_large' }, { status: 413 })
+  let raw: string
+  try {
+    raw = req.body ? await readLimited(req.body, MAX_INPUT_BYTES) : ''
+  } catch {
+    return Response.json({ error: 'payload_too_large' }, { status: 413 })
+  }
   let payload: unknown
   try { payload = JSON.parse(raw) } catch { return Response.json({ error: 'invalid_json' }, { status: 400 }) }
   if (activeExecutions >= MAX_CONCURRENT_EXECUTIONS) return Response.json({ error: 'sandbox_busy' }, { status: 503, headers: { 'retry-after': '2' } })
