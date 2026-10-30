@@ -14,16 +14,6 @@ interface RegisterBody {
 }
 
 export async function POST(req: NextRequest) {
-  // Rate limit: 5 registrations per IP per 15 minutes.
-  const ip = trustedClientIp(req.headers)
-  const rl = await distributedRateLimit(`register:${ip}`, { limit: 5, windowMs: 15 * 60 * 1000 })
-  if (!rl.ok) {
-    return NextResponse.json(
-      { error: 'rate_limited', retryAfterMs: rl.resetMs },
-      { status: 429, headers: { 'retry-after': String(Math.ceil(rl.resetMs / 1000)) } },
-    )
-  }
-
   const body = (await req.json().catch(() => null)) as RegisterBody | null
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
@@ -39,6 +29,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: 'Password must be at least 8 characters and no more than 72 UTF-8 bytes.' },
       { status: 400 },
+    )
+  }
+
+  // Only use an IP bucket when the reverse proxy is explicitly trusted.
+  // Otherwise rate-limit per normalized email rather than locking out every
+  // visitor behind the shared "unknown" address.
+  const ip = trustedClientIp(req.headers)
+  if (ip !== 'unknown' && ip !== 'development') {
+    const ipLimit = await distributedRateLimit(`register-ip:${ip}`, { limit: 20, windowMs: 15 * 60 * 1000 })
+    if (!ipLimit.ok) {
+      return NextResponse.json(
+        { error: 'rate_limited', retryAfterMs: ipLimit.resetMs },
+        { status: 429, headers: { 'retry-after': String(Math.ceil(ipLimit.resetMs / 1000)) } },
+      )
+    }
+  }
+  const emailLimit = await distributedRateLimit(`register-email:${email}`, { limit: 5, windowMs: 15 * 60 * 1000 })
+  if (!emailLimit.ok) {
+    return NextResponse.json(
+      { error: 'rate_limited', retryAfterMs: emailLimit.resetMs },
+      { status: 429, headers: { 'retry-after': String(Math.ceil(emailLimit.resetMs / 1000)) } },
     )
   }
 
