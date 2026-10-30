@@ -1,6 +1,7 @@
 // Webhook helper — emits outgoing webhooks with HMAC-SHA256 signing + retry.
 import { createHmac, randomBytes } from 'crypto'
 import { db } from '@/lib/db'
+import { safeFetch } from '@/lib/ssrf'
 
 export function generateWebhookSecret(): string { return randomBytes(16).toString('hex') }
 
@@ -36,7 +37,7 @@ async function executeDelivery(deliveryId: string, webhookId: string, url: strin
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 15000)
   try {
-    const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-buildr-signature': signature, 'user-agent': 'Buildr-Webhook/1.0' }, body: payloadStr, signal: controller.signal })
+    const res = await safeFetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-buildr-signature': signature, 'user-agent': 'Buildr-Webhook/1.0' }, body: payloadStr, signal: controller.signal })
     const responseBody = await res.text().catch(() => '')
     if (res.ok) {
       await db.from('webhook_deliveries').update({ status: 'success', status_code: res.status, response_body: responseBody.slice(0, 2048), delivered_at: new Date().toISOString(), attempt: attempt + 1 }).eq('id', deliveryId)
