@@ -10,7 +10,7 @@ import {
 } from '@/lib/helpers'
 import { requireSessionUser } from '@/lib/session'
 import { checkLimit, trackUsage } from '@/lib/billing'
-import { rateLimit } from '@/lib/rate-limit'
+import { distributedRateLimit } from '@/lib/rate-limit'
 import type { StackKey, StylingKey } from '@/lib/types'
 
 interface ProjectFileRow {
@@ -96,7 +96,7 @@ export async function POST(
   )
 
   // Rate limit: 10 generations per user per minute.
-  const rl = rateLimit(`generate:${user.id}`, { limit: 10, windowMs: 60_000 })
+  const rl = await distributedRateLimit(`generate:${user.id}`, { limit: 10, windowMs: 60_000 })
   if (!rl.ok) {
     return NextResponse.json(
       { error: 'rate_limited', retryAfterMs: rl.resetMs },
