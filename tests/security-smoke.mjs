@@ -23,6 +23,28 @@ test('SSRF checks reject loopback, link-local, private IPv6, credentials and non
   await assert.rejects(safeFetch('http://127.0.0.1/'), /SSRF blocked/)
 })
 
+test('SSRF transport pins outbound connections to validated public DNS answers', () => {
+  const ssrfSource = readFileSync(new URL('../src/lib/ssrf.ts', import.meta.url), 'utf8')
+  const pinnedSource = readFileSync(new URL('../src/lib/ssrf-pinned.ts', import.meta.url), 'utf8')
+  assert.ok(ssrfSource.includes("import { fetchWithPinnedAddress } from '@/lib/ssrf-pinned'"), 'safeFetch must use the pinned transport')
+  assert.ok(ssrfSource.includes('await fetchWithPinnedAddress(current,'), 'every redirect hop must use the pinned transport')
+  assert.ok(!ssrfSource.includes('await fetch(current,'), 'untrusted destinations must not use global fetch')
+  assert.ok(pinnedSource.includes("lookup(hostname, { all: true, verbatim: true })"), 'transport must resolve all DNS answers')
+  assert.ok(pinnedSource.includes('records.some((record) => isBlockedIp(record.address))'), 'transport must reject mixed public/private DNS answers')
+  assert.ok(pinnedSource.includes('lookup: lookupPinned'), 'socket connection must use the checked address')
+  assert.ok(pinnedSource.includes('agent: false'), 'requests must not reuse an unpinned pooled connection')
+  assert.ok(pinnedSource.includes('servername: hostname'), 'HTTPS must validate the original hostname')
+})
+
+test('quota and rate-limit enforcement use service-only atomic database RPCs', () => {
+  const billing = readFileSync(new URL('../src/lib/billing.ts', import.meta.url), 'utf8')
+  const limiter = readFileSync(new URL('../src/lib/rate-limit.ts', import.meta.url), 'utf8')
+  assert.ok(billing.includes("db.rpc('reserve_usage'"), 'quota checks must reserve capacity atomically')
+  assert.ok(billing.includes("db.rpc('commit_usage_reservation'"), 'actual usage must commit against a reservation')
+  assert.ok(limiter.includes("db.rpc('consume_rate_limit'"), 'security-sensitive limits must be shared across instances')
+  assert.ok(limiter.includes("createHash('sha256')"), 'raw identifiers must not be stored as rate-limit keys')
+})
+
 test('payment initialization and verification fail closed without Paystack credentials', async () => {
   const original = process.env.PAYSTACK_SECRET_KEY
   delete process.env.PAYSTACK_SECRET_KEY
@@ -75,10 +97,10 @@ test('registration and credentials login retain password and account-state safeg
   const auth = readFileSync(new URL('../src/lib/auth.ts', import.meta.url), 'utf8')
   assert.ok(register.includes('bcrypt.hash(password, 10)'), 'registration must hash passwords')
   assert.ok(register.includes('Buffer.byteLength(password, \'utf8\') > 72'), 'registration must cap bcrypt password bytes')
-  assert.ok(register.includes('rateLimit('), 'registration must be rate limited')
+  assert.ok(register.includes('distributedRateLimit('), 'registration must use the shared database-backed limiter')
   assert.ok(register.includes('.select(\'id, email, name\')'), 'registration response must not return password or private user fields')
   assert.ok(auth.includes('bcrypt.compare(password, user.password)'), 'login must verify the password hash')
-  assert.ok(auth.includes('rateLimit(`login:${email}`'), 'login must throttle repeated attempts for the same normalized account')
+  assert.ok(auth.includes('distributedRateLimit(`login:${email}`'), 'login must throttle repeated attempts for the same normalized account across instances')
   assert.ok(auth.includes('if (user.is_disabled) return null'), 'disabled accounts must not authenticate')
   assert.ok(auth.includes('if (user.totp_enabled)'), 'login must preserve optional two-factor verification')
 })
