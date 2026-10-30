@@ -1,6 +1,7 @@
 // Typed API client used by all UI components. Wraps fetch with JSON helpers.
 // All endpoints are relative paths (gateway-aware). No absolute URLs.
 
+import { signIn as nextAuthSignIn } from 'next-auth/react'
 import type {
   FileView,
   GenerationView,
@@ -220,27 +221,107 @@ export const api = {
     return json(res)
   },
 
-  async signIn(body: { email: string; password: string }): Promise<{ ok: boolean; error?: string }> {
-    // next-auth credentials sign-in via the provider's callback endpoint.
+  // Credentials sign-in through NextAuth. On failure NextAuth answers 401 with
+  // { url: ".../?error=<Code>" }; the code is returned as `error` so the UI can
+  // react precisely (EmailNotVerified, InvalidTotp, RateLimited, ...).
+  async signIn(body: { email: string; password: string; totpCode?: string }): Promise<{ ok: boolean; error?: string }> {
+    const params = new URLSearchParams({
+      email: body.email,
+      password: body.password,
+      csrfToken: await getCsrfToken(),
+      json: 'true',
+    })
+    if (body.totpCode) params.set('totpCode', body.totpCode)
     const res = await fetch('/api/auth/callback/credentials', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        email: body.email,
-        password: body.password,
-        csrfToken: await getCsrfToken(),
-        json: 'true',
-      }),
+      body: params,
     })
-    if (!res.ok) {
-      return { ok: false, error: 'Invalid email or password.' }
+    let code: string | undefined
+    try {
+      const data = (await res.json()) as { url?: string }
+      if (data.url) code = new URL(data.url, window.location.origin).searchParams.get('error') ?? undefined
+    } catch {
+      /* non-JSON body */
     }
+    if (!res.ok || code) return { ok: false, error: code ?? 'CredentialsSignin' }
     return { ok: true }
   },
 
+  // Names of the OAuth providers the server has credentials for.
+  async getOAuthProviders(): Promise<('google' | 'github')[]> {
+    try {
+      const res = await fetch('/api/auth/providers', { cache: 'no-store' })
+      if (!res.ok) return []
+      const data = (await res.json()) as Record<string, { id: string; type: string }> | null
+      return Object.values(data ?? {})
+        .filter((p) => p.type === 'oauth' && (p.id === 'google' || p.id === 'github'))
+        .map((p) => p.id as 'google' | 'github')
+    } catch {
+      return []
+    }
+  },
+
+  // NextAuth v4 only starts an OAuth flow from a CSRF-protected POST; a plain GET to
+  // /api/auth/signin/<provider> just redirects back to the sign-in page.
   signInWithProvider(provider: 'google' | 'github'): void {
     const callbackUrl = typeof window !== 'undefined' ? window.location.origin : '/'
-    window.location.href = `/api/auth/signin/${provider}?callbackUrl=${encodeURIComponent(callbackUrl)}`
+    void nextAuthSignIn(provider, { callbackUrl })
+  },
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    const res = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+    return json(res)
+  },
+
+  async resetPassword(token: string, password: string): Promise<{ message: string }> {
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, password }),
+    })
+    return json(res)
+  },
+
+  async resendVerification(email: string): Promise<{ message: string }> {
+    const res = await fetch('/api/auth/resend-verification', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+    return json(res)
+  },
+
+  // ----- Two-factor authentication (settings) -----
+
+  async twoFactorStatus(): Promise<{ enabled: boolean }> {
+    return json(await fetch('/api/auth/2fa/enable', { cache: 'no-store' }))
+  },
+
+  async twoFactorBegin(): Promise<{ secret: string; otpauthUrl: string; manualKey: string }> {
+    return json(await fetch('/api/auth/2fa/enable', { method: 'POST' }))
+  },
+
+  async twoFactorConfirm(code: string): Promise<{ backupCodes: string[] }> {
+    const res = await fetch('/api/auth/2fa/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code }),
+    })
+    return json(res)
+  },
+
+  async twoFactorDisable(body: { code?: string; password?: string }): Promise<{ ok: boolean }> {
+    const res = await fetch('/api/auth/2fa/disable', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return json(res)
   },
 
   async signOut(): Promise<void> {

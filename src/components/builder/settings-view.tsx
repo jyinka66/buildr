@@ -58,6 +58,7 @@ import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { IntegrationMarketplace } from '@/components/builder/integration-marketplace'
+import { TwoFactorCard } from '@/components/builder/security-settings'
 
 type ProviderRow = ProviderConfig & { hasKey: boolean }
 
@@ -512,6 +513,21 @@ export function SettingsView() {
             ))}
           </motion.div>
         )}
+      </section>
+
+      <Separator className="my-10" />
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Section: Security (two-factor authentication)                      */}
+      {/* ----------------------------------------------------------------- */}
+      <section className="space-y-5">
+        <header className="space-y-2">
+          <h2 className="text-xl font-semibold tracking-tight">Security</h2>
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            Protect your account with a second sign-in step.
+          </p>
+        </header>
+        <TwoFactorCard />
       </section>
 
       <Separator className="my-10" />

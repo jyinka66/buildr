@@ -107,11 +107,13 @@ test('registration and credentials login retain password and account-state safeg
   assert.ok(register.includes('Buffer.byteLength(password, \'utf8\') > 72'), 'registration must cap bcrypt password bytes')
   assert.ok(register.includes('distributedRateLimit('), 'registration must use the shared database-backed limiter')
   assert.ok(register.includes('.select(\'id, email, name\')'), 'registration response must not return password or private user fields')
-  assert.ok(auth.includes('bcrypt.compare(password, user.password)'), 'login must verify the password hash')
-  assert.ok(auth.includes('distributedRateLimit(`login:${email}`'), 'login must throttle repeated attempts for the same normalized account across instances')
+  assert.ok(auth.includes('bcrypt.compare(password, user?.password || DUMMY_HASH)'), 'login must verify the password hash, with a dummy compare for unknown accounts')
+  assert.ok(auth.includes('`login:${email}`') && auth.includes('`login:${email}:${clientIp}`'), 'login must throttle repeated attempts per account (and per account+IP) across instances')
   assert.ok(forgot.includes('distributedRateLimit('), 'password reset must use the shared limiter')
   assert.ok(generation.includes('distributedRateLimit('), 'generation must use the shared limiter')
-  assert.ok(auth.includes('if (user.is_disabled) return null'), 'disabled accounts must not authenticate')
+  assert.ok(auth.includes('if (user.is_disabled) throw new Error(AUTH_ERRORS.accountDisabled)'), 'disabled accounts must not authenticate')
+  assert.ok(auth.indexOf('bcrypt.compare(password') < auth.indexOf('AUTH_ERRORS.accountDisabled)'), 'account state must only be reported after the password is verified')
+  assert.ok(auth.indexOf('bcrypt.compare(password') < auth.indexOf('AUTH_ERRORS.emailNotVerified)'), 'verification state must only be reported after the password is verified')
   assert.ok(auth.includes('if (user.totp_enabled)'), 'login must preserve optional two-factor verification')
 })
 
@@ -192,4 +194,54 @@ test('browser previews isolate generated code from network and Buildr APIs', () 
   assert.ok(exporter.includes("frame-src 'none'"), 'preview CSP must block nested frames')
   assert.ok(exporter.includes('hardenPreviewHtml(html)'), 'static and fallback previews must receive the policy')
   assert.ok(exporter.includes('hardenPreviewHtml(result.html)'), 'interactive previews must receive the policy')
+})
+
+test('sign-in reports precise errors, supports OAuth safely, and keeps the 2FA step retryable', () => {
+  const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
+  const auth = read('../src/lib/auth.ts')
+  const check = read('../src/app/api/auth/2fa/check/route.ts')
+  const enable = read('../src/app/api/auth/2fa/enable/route.ts')
+  const resend = read('../src/app/api/auth/resend-verification/route.ts')
+  const reset = read('../src/app/api/auth/reset-password/route.ts')
+  const store = read('../src/lib/store.ts')
+  const client = read('../src/lib/api-client.ts')
+  const page = read('../src/app/page.tsx')
+
+  // OAuth: providers only when configured, verified emails only, and an unverified local row is neutralised.
+  assert.ok(auth.includes('GoogleProvider(') && auth.includes('GitHubProvider('), 'Google and GitHub providers must be registered')
+  assert.ok(auth.includes('process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET'), 'Google must only be enabled when configured')
+  assert.ok(auth.includes('process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET'), 'GitHub must only be enabled when configured')
+  assert.ok(auth.includes("(profile as { email_verified?: boolean } | undefined)?.email_verified !== true"), 'Google sign-in must require a verified email')
+  assert.ok(auth.includes('e.primary && e.verified'), 'GitHub sign-in must only trust a verified primary email')
+  assert.ok(auth.includes('existing.is_disabled') && auth.includes('password: unusable'), 'OAuth must refuse disabled users and reset the password of unverified rows')
+  assert.ok(auth.includes("account.provider !== 'credentials'") && auth.includes("from('users').select('id, email')"), 'OAuth sessions must carry the Buildr user id, not the provider id')
+
+  // Login limiter must not let one IP lock the owner out, and must still cap distributed guessing.
+  assert.ok(auth.includes('limit: 100') && auth.includes('ipKnown ?'), 'per-account lockout must be scoped by IP with a looser global ceiling')
+  assert.ok(auth.includes('throw new Error(AUTH_ERRORS.rateLimited)'), 'rate limiting must be reported, not look like a wrong password')
+
+  // Pre-login check mirrors the real login (shared limiter, trusted IP, dummy compare, state after password).
+  assert.ok(check.includes('distributedRateLimit(') && check.includes('trustedClientIp('), '2fa/check must use the shared limiter and trusted client IP')
+  assert.ok(!check.includes("headers.get('x-forwarded-for')"), '2fa/check must not trust a raw forwarded header')
+  assert.ok(check.includes('user?.password || DUMMY_HASH'), '2fa/check must not throw on a missing password hash')
+  assert.ok(check.indexOf('bcrypt.compare') < check.indexOf('email_not_verified'), '2fa/check must verify the password before reporting verification state')
+
+  // 2FA management cannot be used to swap the secret of an account that already has 2FA.
+  assert.ok(enable.includes('current?.totp_enabled') && enable.includes('status: 409'), '2fa/enable must refuse when 2FA is already on')
+  for (const route of ['verify', 'disable']) {
+    assert.ok(read(`../src/app/api/auth/2fa/${route}/route.ts`).includes('distributedRateLimit('), `2fa/${route} must throttle code guessing`)
+  }
+
+  // Resend verification never reveals whether an account exists and is rate limited per address.
+  assert.ok(resend.includes('const GENERIC') && resend.includes('resend-email:'), 'resend must give a uniform answer and limit per address')
+  assert.ok(resend.includes("type: 'signup'"), 'resend must use the Supabase signup confirmation email')
+  assert.ok(reset.includes('distributedRateLimit(') && !reset.includes("headers.get('x-forwarded-for')"), 'password reset must use the shared limiter and trusted client IP')
+
+  // Client wiring.
+  assert.ok(client.includes("nextAuthSignIn(provider, { callbackUrl })"), 'OAuth must start with next-auth POST + CSRF, not a plain GET redirect')
+  assert.ok(!client.includes('/api/auth/signin/${provider}'), 'the broken GET redirect to /api/auth/signin/<provider> must be gone')
+  const completeTwoFactor = store.slice(store.indexOf('async completeTwoFactor'), store.indexOf('cancelTwoFactor() {'))
+  assert.ok(!completeTwoFactor.includes("twoFactorRequired: false, twoFactorEmail: '', twoFactorPassword: '' })\n    }"), 'a wrong 2FA code must not reset the dialog')
+  assert.ok(completeTwoFactor.includes('Stay on the code step'), 'a wrong 2FA code must keep the code step open')
+  assert.ok(page.includes('/^[a-f0-9]{64}$/i.test(reset)') && page.includes('window.history.replaceState'), 'reset tokens must be validated and removed from the address bar')
 })

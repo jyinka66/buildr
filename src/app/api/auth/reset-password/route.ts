@@ -3,12 +3,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { audit } from '@/lib/snapshot'
-import { rateLimit, rateLimitedResponse } from '@/lib/rate-limit'
+import { distributedRateLimit } from '@/lib/distributed-rate-limit'
+import { rateLimitedResponse, trustedClientIp } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
   // Rate limit: 20 reset attempts per 10 min per IP.
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-  const rl = rateLimit(`reset:${ip}`, { limit: 20, windowMs: 600_000 })
+  // Shared across instances, and keyed on the trusted client IP only (never a raw header).
+  const ip = trustedClientIp(req.headers)
+  const rl = await distributedRateLimit(`reset:${ip}`, { limit: 20, windowMs: 600_000 })
   if (!rl.ok) return rateLimitedResponse(rl.resetMs)
 
   const body = (await req.json().catch(() => null)) as { token?: string; password?: string } | null

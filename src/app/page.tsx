@@ -4,7 +4,7 @@
 // Renders the global shell + the active view from the Zustand store.
 
 import React, { useEffect } from 'react'
-import { useBuilder } from '@/lib/store'
+import { useBuilder, authMessage } from '@/lib/store'
 import { AppHeader, AppFooter } from '@/components/builder/app-shell'
 import { AppSidebar, AppTopBar } from '@/components/builder/app-sidebar'
 import { LandingView } from '@/components/builder/landing-view'
@@ -38,10 +38,34 @@ export default function Home() {
   const bootError = useBuilder((s) => s.bootError)
   const session = useBuilder((s) => s.session)
   const openAuth = useBuilder((s) => s.openAuth)
+  const openReset = useBuilder((s) => s.openReset)
+  const showAuthError = useBuilder((s) => s.showAuthError)
 
   useEffect(() => {
     if (!booted) boot()
   }, [booted, boot])
+
+  // Email links and OAuth redirects land on "/" with a query string:
+  //   /?reset=<64-hex token>   password reset email  -> choose-a-new-password step
+  //   /?error=<NextAuth code>  failed OAuth sign-in   -> message in the sign-in dialog
+  // The query is stripped right away so a token never stays in the address bar or history.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const reset = params.get('reset')
+    const err = params.get('error')
+    if (reset && /^[a-f0-9]{64}$/i.test(reset)) {
+      openReset(reset)
+    } else if (err) {
+      showAuthError(authMessage(err))
+    } else {
+      return
+    }
+    params.delete('reset')
+    params.delete('error')
+    const rest = params.toString()
+    window.history.replaceState({}, '', rest ? `/?${rest}` : '/')
+  }, [openReset, showAuthError])
 
   // Hidden admin login: visiting /?admin=1 opens the auth dialog.
   useEffect(() => {
