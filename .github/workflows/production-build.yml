@@ -41,6 +41,49 @@ jobs:
       - run: npm run test:sandbox
       - run: npm run test:deployment
 
+
+  sandbox-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NODE_ENV: production
+      SANDBOX_RUNNER_TOKEN: ci-only-sandbox-token-value-32chars
+      SANDBOX_RUNNER_PORT: 3031
+      SANDBOX_IMAGE: buildr-sandbox:ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build disposable sandbox worker image
+        run: docker build -t buildr-sandbox:ci -f mini-services/api-runtime/Dockerfile mini-services/api-runtime
+      - name: Start isolated sandbox runner
+        run: |
+          bun run mini-services/api-runtime/sandbox-runner.ts > "$RUNNER_TEMP/buildr-sandbox-runner.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/buildr-sandbox-runner.pid"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3031/__health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/buildr-sandbox-runner.log"
+          exit 1
+      - name: Run sandbox static and live Docker integration tests
+        run: npm run test:sandbox
+        env:
+          SANDBOX_TEST_URL: http://127.0.0.1:3031
+          SANDBOX_RUNNER_TOKEN: ci-only-sandbox-token-value-32chars
+      - name: Stop sandbox runner
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/buildr-sandbox-runner.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/buildr-sandbox-runner.pid")" 2>/dev/null || true
+          fi
+
   docker-build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
