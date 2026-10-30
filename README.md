@@ -66,6 +66,7 @@ The Render blueprint is in `render.yaml`. Configure its `sync: false` environmen
 - A 64-character hexadecimal `ENCRYPTION_KEY`
 - Independent, random `SIDECAR_AUTH_TOKEN` and `SANDBOX_RUNNER_TOKEN` values (at least 32 characters)
 - Allowed origins and any provider credentials used by the enabled features
+- `TRUST_PROXY_HEADERS=true` only when the hosting proxy overwrites incoming forwarding headers and direct app access is blocked; otherwise leave it false. Account-based limits still apply when a trusted client IP is unavailable.
 
 ### Paystack test mode
 
