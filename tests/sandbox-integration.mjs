@@ -26,19 +26,19 @@ async function execute(source, method = 'GET') {
 test('sandbox executes a route in an isolated container', options, async () => {
   const result = await execute('export async function GET() { return Response.json({ sandbox: true }) }')
   assert.equal(result.http, 200)
-  assert.equal(result.json.status, 200)
-  assert.deepEqual(JSON.parse(result.json.body), { sandbox: true })
+  assert.equal(result.json.status, 200, JSON.stringify(result.json))
+  assert.deepEqual(JSON.parse(result.json.body), { sandbox: true }, JSON.stringify(result.json))
 })
 
 test('sandbox container has no outbound network', options, async () => {
   const source = `export async function GET() { let blocked = false; try { await fetch('http://1.1.1.1', { signal: AbortSignal.timeout(700) }) } catch { blocked = true }; return Response.json({ blocked }) }`
   const result = await execute(source)
   assert.equal(result.http, 200)
-  assert.equal(JSON.parse(result.json.body).blocked, true)
+  assert.equal(JSON.parse(result.json.body).blocked, true, JSON.stringify(result.json))
 })
 
 test('sandbox execution timeout is enforced and the worker is killed', options, async () => {
   const result = await execute('export async function GET() { while (true) {} }')
-  assert.equal(result.http, 504)
+  assert.equal(result.http, 504, JSON.stringify(result.json))
   assert.equal(result.json.error, 'execution_timeout')
 })
