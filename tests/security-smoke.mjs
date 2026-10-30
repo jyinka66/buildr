@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { isUrlSafe, safeFetch } from '../src/lib/ssrf.ts'
 import { initializePayment, verifyPayment, generateReference } from '../src/lib/paystack.ts'
+import { rateLimit } from '../src/lib/rate-limit.ts'
 
 test('SSRF checks reject loopback, link-local, private IPv6, credentials and non-HTTP schemes', async () => {
   for (const url of [
@@ -61,4 +62,23 @@ test('production database access fails closed instead of using the in-memory dem
   const source = readFileSync(new URL('../src/lib/supabase-server.ts', import.meta.url), 'utf8')
   assert.ok(source.includes("process.env.NODE_ENV === 'production'"))
   assert.ok(source.includes('throw new SupabaseNotConfiguredError()'))
+})
+
+
+test('token bucket retry time matches the next available token', () => {
+  const originalNow = Date.now
+  let now = 1_800_000_000_000
+  Date.now = () => now
+  const key = `rate-limit-test-${Math.random()}`
+  try {
+    assert.equal(rateLimit(key, { limit: 2, windowMs: 1000 }).ok, true)
+    assert.equal(rateLimit(key, { limit: 2, windowMs: 1000 }).ok, true)
+    const blocked = rateLimit(key, { limit: 2, windowMs: 1000 })
+    assert.equal(blocked.ok, false)
+    assert.equal(blocked.resetMs, 500)
+    now += blocked.resetMs
+    assert.equal(rateLimit(key, { limit: 2, windowMs: 1000 }).ok, true)
+  } finally {
+    Date.now = originalNow
+  }
 })
