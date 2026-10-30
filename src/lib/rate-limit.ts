@@ -2,12 +2,8 @@ import { createHash } from 'node:crypto'
 import { db } from '@/lib/db'
 import { isSupabaseConfigured } from '@/lib/supabase-server'
 
-// Simple in-memory rate limiter.
-// ------------------------------------------------------------------
-// Per-key token-bucket limiter. Used to throttle auth + generation
-// endpoints per user. In-memory only (resets on server restart) —
-// adequate for a single-instance deployment. For multi-instance, swap
-// for a Redis-backed limiter.
+// Local in-memory token bucket for low-risk/dev paths. Security-sensitive
+// routes should use distributedRateLimit(), backed by atomic Postgres counters.
 
 interface Bucket {
   tokens: number
