@@ -23,6 +23,15 @@ async function execute(source, method = 'GET') {
   return { http: response.status, json: await response.json() }
 }
 
+test('sandbox runner rejects unauthenticated execution requests', options, async () => {
+  const response = await fetch(`${base.replace(/\/$/, '')}/execute`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  })
+  assert.equal(response.status, 401)
+})
+
 test('sandbox executes a route in an isolated container', options, async () => {
   const result = await execute('export async function GET() { return Response.json({ sandbox: true }) }')
   assert.equal(result.http, 200)
