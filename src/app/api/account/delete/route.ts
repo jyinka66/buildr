@@ -25,11 +25,15 @@ export async function POST(req: NextRequest) {
     // Best-effort anonymous audit record: never retain the deleted user's
     // email or identifier, and don't misreport a successful deletion if
     // this secondary audit write is unavailable.
-    await db.from('audit_log').insert({
-      user_id: null,
-      action: 'account.delete',
-      details: JSON.stringify({ deletedAt }),
-    }).then(() => undefined).catch(() => undefined)
+    try {
+      await db.from('audit_log').insert({
+        user_id: null,
+        action: 'account.delete',
+        details: JSON.stringify({ deletedAt }),
+      })
+    } catch {
+      // Deletion has already succeeded; audit failure must not reverse that.
+    }
     return NextResponse.json({ ok: true, message: 'Account permanently deleted.', deletedAt })
   } catch (err) {
     if ((err as { status?: number }).status === 401) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
