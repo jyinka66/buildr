@@ -1,6 +1,6 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
-import { request as httpRequest } from 'node:http'
+import { request as httpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { Readable } from 'node:stream'
 import { isBlockedIp } from './ssrf-ip.ts'
@@ -110,14 +110,18 @@ export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promi
   }
 
   return await new Promise<Response>((resolve, reject) => {
-    const transport = url.protocol === 'https:' ? httpsRequest : httpRequest
-    const req = transport(requestOptions, (res) => {
+    const onResponse = (res: IncomingMessage) => {
       const responseHeaders = new Headers()
       for (let i = 0; i < res.rawHeaders.length; i += 2) {
         responseHeaders.append(res.rawHeaders[i], res.rawHeaders[i + 1])
       }
       const status = res.statusCode || 502
-      const responseBody = status === 204 || status === 304 || (status >= 100 && status < 200)
+      if (status < 200) {
+        res.destroy()
+        reject(new Error('safe_fetch_unexpected_informational_status'))
+        return
+      }
+      const responseBody = status === 204 || status === 304
         ? null
         : Readable.toWeb(res) as ReadableStream<Uint8Array>
       resolve(new Response(responseBody, {
@@ -125,7 +129,10 @@ export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promi
         statusText: res.statusMessage || '',
         headers: responseHeaders,
       }))
-    })
+    }
+    let req: ClientRequest
+    if (url.protocol === 'https:') req = httpsRequest(requestOptions, onResponse)
+    else req = httpRequest(requestOptions, onResponse)
 
     const signal = init.signal
     const abort = () => req.destroy(signal?.reason instanceof Error ? signal.reason : new Error('safe_fetch_aborted'))
