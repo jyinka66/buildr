@@ -1,0 +1,3 @@
+-- Compatibility marker for the already-applied remote migration.
+-- The final idempotent definitions, including stale-counter cleanup and the
+-- corrected reservation commit logic, are consolidated in 20261030082610_atomic_quota_and_distributed_rate_limits.sql.
