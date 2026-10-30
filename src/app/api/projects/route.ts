@@ -15,7 +15,7 @@ import { generateInitialProject } from '@/lib/llm/code-generator'
 import { seedIntegrations } from '@/lib/generator/integrations'
 import { seedProviders } from '@/lib/llm/router'
 import { requireSessionUser } from '@/lib/session'
-import { checkLimit, trackUsage } from '@/lib/billing'
+import { checkLimit, releaseUsageReservation, trackUsage } from '@/lib/billing'
 import type { DbConfig } from '@/lib/types'
 
 export async function GET() {
@@ -113,6 +113,30 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  let tokenLimit: Awaited<ReturnType<typeof checkLimit>> | null = null
+  let generationMaxTokens = 8000
+  if (body.generate !== false) {
+    tokenLimit = await checkLimit(user.id, 'llm_tokens')
+    if (!tokenLimit.ok) {
+      await releaseUsageReservation(user.id, limit.reservationId)
+      return NextResponse.json(
+        { error: 'plan_limit_exceeded', message: `LLM token limit reached (${tokenLimit.limit}). Upgrade your plan.` },
+        { status: 402 },
+      )
+    }
+    const availableTokens = tokenLimit.limit === -1 ? 8000 : tokenLimit.limit - tokenLimit.used
+    const estimatedInputTokens = Math.ceil((prompt.length + name.length + integrations.join(',').length) / 3) + 2500
+    if (availableTokens <= estimatedInputTokens) {
+      await releaseUsageReservation(user.id, tokenLimit.reservationId)
+      await releaseUsageReservation(user.id, limit.reservationId)
+      return NextResponse.json(
+        { error: 'plan_limit_exceeded', message: 'Not enough monthly AI token capacity remains for a new generation.' },
+        { status: 402 },
+      )
+    }
+    generationMaxTokens = Math.max(1, Math.min(8000, availableTokens - estimatedInputTokens))
+  }
+
   const slug = await uniqueSlug(slugify(name))
 
   const { data: project, error: createError } = await db
@@ -132,12 +156,21 @@ export async function POST(req: NextRequest) {
     .select('*')
     .single()
   if (createError || !project) {
+    await releaseUsageReservation(user.id, limit.reservationId)
+    await releaseUsageReservation(user.id, tokenLimit?.reservationId)
     throw createError ?? new Error('project_create_failed')
   }
   const projectId = (project as ProjectDbRow).id
 
-  // Track usage.
-  await trackUsage(user.id, 'projects', 1, { projectId, name })
+  // Commit the atomically reserved project unit before starting generation.
+  const projectUsageRecorded = await trackUsage(user.id, 'projects', 1, {
+    projectId, name, reservationId: limit.reservationId,
+  })
+  if (!projectUsageRecorded) {
+    await db.from('projects').delete().eq('id', projectId).eq('owner_id', user.id)
+    await releaseUsageReservation(user.id, tokenLimit?.reservationId)
+    return NextResponse.json({ error: 'usage_commit_failed' }, { status: 503 })
+  }
 
   if (body.generate !== false) {
     try {
@@ -150,7 +183,14 @@ export async function POST(req: NextRequest) {
         integrations,
         dbConfig,
         overrideProvider: (body.providerKey as never) ?? null,
+        maxTokens: generationMaxTokens,
       })
+      const tokenUsageRecorded = await trackUsage(user.id, 'llm_tokens', Math.max(1, result.tokens), {
+        projectId, reservationId: tokenLimit?.reservationId,
+      })
+      if (!tokenUsageRecorded) {
+        return NextResponse.json({ error: 'usage_commit_failed', message: 'Generation completed, but token usage could not be committed safely.' }, { status: 503 })
+      }
       const { data: freshRow } = await db
         .from('projects')
         .select('*')
