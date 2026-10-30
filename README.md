@@ -66,6 +66,10 @@ The Render blueprint is in `render.yaml`. Configure its `sync: false` environmen
 - A 64-character hexadecimal `ENCRYPTION_KEY`
 - Independent, random `SIDECAR_AUTH_TOKEN` and `SANDBOX_RUNNER_TOKEN` values (at least 32 characters)
 - Allowed origins and any provider credentials used by the enabled features
+
+### Paystack test mode
+
+For test transactions, set `PAYSTACK_MODE=test` and configure a Paystack **test secret key** (`sk_test_...`) in the server environment. The application rejects a key whose prefix does not match the configured mode. For live transactions, set `PAYSTACK_MODE=live` and use an `sk_live_...` key. Never put either secret key in a `NEXT_PUBLIC_*` variable or commit it to the repository. Test-mode payments do not represent real customer charges.
 - A dedicated Docker host for the sandbox runner, configured with `DOCKER_HOST`, `DOCKER_CA_PEM`, `DOCKER_CLIENT_CERT_PEM`, and `DOCKER_CLIENT_KEY_PEM`
 - `SANDBOX_IMAGE` set to the published worker image, plus registry credentials only if the image package is private
 
