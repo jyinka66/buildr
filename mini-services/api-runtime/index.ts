@@ -21,6 +21,7 @@
 // integration code runs without real credentials.
 
 import { createClient } from '@supabase/supabase-js'
+import ts from 'typescript'
 
 const PORT = 3030
 
@@ -99,18 +100,22 @@ function findRouteFile(
 }
 
 // ---- Transpile + execute a route handler --------------------------------
-const transpiler = new Bun.Transpiler({
-  loader: 'ts',
-  target: 'bun',
-  tsconfig: {
-    compilerOptions: {
-      jsx: 'react-jsx',
-      strict: false,
-      module: 'esnext',
-      moduleResolution: 'bundler',
-    },
-  },
-})
+// Route handlers are evaluated through a CommonJS wrapper below. Compile their
+// imports/exports to CommonJS explicitly; preserving ESM syntax causes
+// "Cannot use import statement outside a module" in the local development path.
+const routeCompilerOptions: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.CommonJS,
+  jsx: ts.JsxEmit.ReactJSX,
+  esModuleInterop: false,
+  allowJs: true,
+  strict: false,
+  skipLibCheck: true,
+}
+
+function transpileRoute(source: string): string {
+  return ts.transpileModule(source, { compilerOptions: routeCompilerOptions }).outputText
+}
 
 // Mock module registry — provides stubs for imports the generated code uses.
 function buildRequireShim(projectId: string, routePath: string) {
@@ -224,7 +229,7 @@ function buildRequireShim(projectId: string, routePath: string) {
         if (foundPath && files) {
           if (moduleCache.has(foundPath)) return moduleCache.get(foundPath)
           const src = files.get(foundPath)!
-          const js = transpiler.transformSync(src)
+          const js = transpileRoute(src)
           const mod = { exports: {} as Record<string, unknown> }
           const factory = new Function('module', 'exports', 'require', js)
           factory(mod, mod.exports, localRequire)
@@ -254,7 +259,7 @@ async function executeRoute(
   if (!src) return { status: 404, body: JSON.stringify({ error: 'route_not_found' }), headers: {} }
 
   const localRequire = buildRequireShim(projectId, filePath)
-  const js = transpiler.transformSync(src)
+  const js = transpileRoute(src)
   const mod = { exports: {} as Record<string, unknown> }
   const factory = new Function('module', 'exports', 'require', js)
   factory(mod, mod.exports, localRequire)
