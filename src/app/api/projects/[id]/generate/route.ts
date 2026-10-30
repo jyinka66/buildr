@@ -67,6 +67,15 @@ export async function POST(
     return NextResponse.json({ error: 'message required' }, { status: 400 })
   }
 
+  // Rate limit: 10 generations per user per minute.
+  const rl = await distributedRateLimit(`generate:${user.id}`, { limit: 10, windowMs: 60_000 })
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'rate_limited', retryAfterMs: rl.resetMs },
+      { status: 429, headers: { 'retry-after': String(Math.ceil(rl.resetMs / 1000)) } },
+    )
+  }
+
   // Record user turn.
   const { error: genErr } = await db
     .from('generations')
@@ -94,15 +103,6 @@ export async function POST(
   const existingFileList = (existingFiles as Pick<ProjectFileRow, 'path' | 'content'>[] | null ?? []).map(
     (f) => ({ path: f.path, content: f.content }),
   )
-
-  // Rate limit: 10 generations per user per minute.
-  const rl = await distributedRateLimit(`generate:${user.id}`, { limit: 10, windowMs: 60_000 })
-  if (!rl.ok) {
-    return NextResponse.json(
-      { error: 'rate_limited', retryAfterMs: rl.resetMs },
-      { status: 429, headers: { 'retry-after': String(Math.ceil(rl.resetMs / 1000)) } },
-    )
-  }
 
   // Enforce usage metering: check llm_tokens quota before generating.
   const limit = await checkLimit(user.id, 'llm_tokens')
