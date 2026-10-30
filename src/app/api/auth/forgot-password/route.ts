@@ -7,14 +7,24 @@ import { distributedRateLimit } from '@/lib/distributed-rate-limit'
 import { rateLimitedResponse, trustedClientIp } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
-  const ip = trustedClientIp(req.headers)
-  const rl = await distributedRateLimit(`forgot:${ip}`, { limit: 3, windowMs: 600_000 })
-  if (!rl.ok) return rateLimitedResponse(rl.resetMs)
-
   const { email } = (await req.json()) as { email?: string }
   const normalized = email?.trim().toLowerCase()
   if (!normalized || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
     return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 })
+  }
+
+  const ip = trustedClientIp(req.headers)
+  if (ip !== 'unknown' && ip !== 'development') {
+    const ipLimit = await distributedRateLimit(`forgot-ip:${ip}`, { limit: 10, windowMs: 600_000 })
+    if (!ipLimit.ok) return rateLimitedResponse(ipLimit.resetMs)
+  }
+  const emailLimit = await distributedRateLimit(`forgot-email:${normalized}`, { limit: 3, windowMs: 600_000 })
+  if (!emailLimit.ok) {
+    // Keep the same response for known and unknown accounts.
+    return NextResponse.json({
+      ok: true,
+      message: 'If an account exists with that email, a reset link has been sent.',
+    })
   }
 
   // Always return success to prevent email enumeration.
