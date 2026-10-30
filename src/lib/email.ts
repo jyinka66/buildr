@@ -14,7 +14,7 @@ export async function sendEmail({ to, subject, html }: SendEmailInput): Promise<
       return { ok: false, error: 'RESEND_API_KEY is not configured' }
     }
     // Local-only fallback: allow developers to inspect the verification link.
-    console.log(`\n📧 [EMAIL] To: ${to}\n   Subject: ${subject}\n   ${html.replace(/<[^>]+/g, '').slice(0, 500)}\n`)
+    console.log(`\n📧 [EMAIL] To: ${to}\n   Subject: ${subject}\n   ${html.replace(/<[^>]*>/g, '').slice(0, 500)}\n`)
     return { ok: true }
   }
 
