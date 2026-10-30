@@ -19,6 +19,7 @@ import type {
   ProviderKey,
   TaskKind,
 } from '@/lib/types'
+import { rankProviders } from '@/lib/llm/routing-policy'
 
 // ---------------------------------------------------------------------------
 // Built-in provider catalogue. These are the defaults seeded into the DB.
@@ -467,7 +468,9 @@ async function* runOpenAICompatStream(
         ? 'https://api.deepseek.com/v1'
         : provider.key === 'google'
           ? 'https://generativelanguage.googleapis.com/v1beta/openai'
-          : 'http://localhost:11434/v1')
+          : provider.key === 'anthropic'
+            ? 'https://api.anthropic.com/v1'
+            : 'http://localhost:11434/v1')
 
   if (provider.key === 'anthropic') {
     const system = messages.find((m) => m.role === 'system')?.content ?? ''
