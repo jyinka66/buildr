@@ -19,12 +19,15 @@ async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; r
     .maybeSingle()
   if (error) return { ok: false, reason: 'We could not verify this link right now. Please try again later.' }
   if (!user || user.verify_token !== token) return { ok: false, reason: 'This verification link is invalid or has already been used.' }
-  const { error: updateError } = await db
+  const { data: updated, error: updateError } = await db
     .from('users')
     .update({ email_verified: true, verify_token: null })
     .eq('id', user.id)
     .eq('verify_token', token)
+    .select('id')
+    .maybeSingle()
   if (updateError) return { ok: false, reason: 'We could not complete verification. Please try again later.' }
+  if (!updated) return { ok: false, reason: 'This verification link has already been used.' }
   return { ok: true }
 }
 
