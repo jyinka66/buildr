@@ -1,13 +1,11 @@
-// POST /api/auth/register — create a new user account.
-// Creates a pending account and sends a time-limited email verification link.
-// No session is created until the address has been verified.
+// POST /api/auth/register — create a pending Buildr account and ask Supabase Auth
+// to send its native email-confirmation message. No app session is created here.
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcryptjs'
-import { randomBytes } from 'crypto'
 import { db } from '@/lib/db'
 import { distributedRateLimit } from '@/lib/distributed-rate-limit'
 import { trustedClientIp } from '@/lib/rate-limit'
-import { emailVerificationHtml, sendEmail } from '@/lib/email'
 
 interface RegisterBody {
   email?: string
@@ -34,9 +32,6 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // Only use an IP bucket when the reverse proxy is explicitly trusted.
-  // Otherwise rate-limit per normalized email rather than locking out every
-  // visitor behind the shared "unknown" address.
   const ip = trustedClientIp(req.headers)
   if (ip !== 'unknown' && ip !== 'development') {
     const ipLimit = await distributedRateLimit(`register-ip:${ip}`, { limit: 20, windowMs: 15 * 60 * 1000 })
@@ -60,30 +55,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'account_lookup_failed' }, { status: 503 })
   }
   if (existing) {
-    return NextResponse.json(
-      { error: 'An account with that email already exists.' },
-      { status: 409 },
-    )
+    return NextResponse.json({ error: 'An account with that email already exists.' }, { status: 409 })
   }
 
-  // In production, generate links only from the configured canonical origin.
-  // Do not trust Host/X-Forwarded-Host headers to build security-sensitive links.
-  const configuredOrigin = process.env.NEXTAUTH_URL
+  const supabaseUrl = process.env.SUPABASE_URL
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return NextResponse.json({ error: 'Supabase email confirmation is not configured.' }, { status: 503 })
+  }
+
   let origin: string
   try {
+    const configuredOrigin = process.env.NEXTAUTH_URL
     origin = new URL(configuredOrigin || (process.env.NODE_ENV !== 'production' ? req.nextUrl.origin : '')).origin
     if (process.env.NODE_ENV === 'production' && !configuredOrigin) throw new Error('NEXTAUTH_URL is required')
     if (process.env.NODE_ENV === 'production' && !origin.startsWith('https://')) throw new Error('HTTPS is required')
   } catch {
-    return NextResponse.json({ error: 'Email verification is not configured. Please try again later.' }, { status: 503 })
+    return NextResponse.json({ error: 'Email confirmation is not configured. Please try again later.' }, { status: 503 })
   }
 
-  // Timestamped random token: expires after 24 hours and is single-use.
-  const verifyToken = `${Date.now()}.${randomBytes(32).toString('hex')}`
+  // Create the app's user row first so a fast confirmation click can never
+  // arrive before the corresponding Buildr account exists.
   const passwordHash = await bcrypt.hash(password, 10)
   const { data: user, error: insertError } = await db
     .from('users')
-    .insert({ email, name, password: passwordHash, email_verified: false, verify_token: verifyToken })
+    .insert({ email, name, password: passwordHash, email_verified: false, verify_token: null })
     .select('id, email, name')
     .single()
 
@@ -91,19 +87,53 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'account_creation_failed' }, { status: 500 })
   }
 
-  const verifyUrl = new URL('/api/auth/verify-email', origin)
-  verifyUrl.searchParams.set('token', verifyToken)
-  const sent = await sendEmail({
-    to: email,
-    subject: 'Verify your Buildr email address',
-    html: emailVerificationHtml(name || 'there', verifyUrl.toString()),
+  // Use only the Supabase publishable/anon key for public Auth operations.
+  // The service-role client remains isolated in the existing server DB helper.
+  const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
   })
-  if (!sent.ok) {
-    console.error('Registration verification email failed:', sent.error)
-    // Fail closed: do not leave an account that cannot complete verification.
+  const { data: authData, error: authError } = await authClient.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: new URL('/auth/confirm-email', origin).toString(),
+      data: { name: name || '' },
+    },
+  })
+
+  if (authError || !authData.user) {
     await db.from('users').delete().eq('id', user.id)
-    return NextResponse.json({ error: 'We could not send your verification email. Please try again later.' }, { status: 503 })
+    return NextResponse.json(
+      { error: 'Supabase could not send a confirmation email. Check Supabase Auth email settings and try again.' },
+      { status: 503 },
+    )
   }
 
-  return NextResponse.json({ ok: true, message: 'Check your email for a verification link.' }, { status: 201 })
+  // Supabase must require a real email confirmation. If Auth returned a session
+  // immediately, confirmation is disabled; clean up rather than silently bypass it.
+  if (authData.session || authData.user.email_confirmed_at) {
+    await db.from('users').delete().eq('id', user.id)
+    if (authData.user.id) {
+      await db.auth.admin.deleteUser(authData.user.id).catch(() => ({ error: null }))
+    }
+    return NextResponse.json(
+      { error: 'Email confirmation is disabled in Supabase Auth. Enable Confirm email and try again.' },
+      { status: 503 },
+    )
+  }
+
+  // Supabase can return a deliberately obfuscated user for an email that
+  // already exists. Do not create a second app account in that case.
+  if (Array.isArray(authData.user.identities) && authData.user.identities.length === 0) {
+    await db.from('users').delete().eq('id', user.id)
+    return NextResponse.json(
+      { error: 'An account with that email may already exist. Try signing in or resetting your password.' },
+      { status: 409 },
+    )
+  }
+
+  return NextResponse.json(
+    { ok: true, message: 'Check your email for a confirmation link from Supabase.' },
+    { status: 201 },
+  )
 }
