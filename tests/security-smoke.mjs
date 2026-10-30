@@ -21,6 +21,10 @@ test('SSRF checks reject loopback, link-local, private IPv6, credentials and non
     assert.equal(result.ok, false, `${url} must be rejected`)
   }
   await assert.rejects(safeFetch('http://127.0.0.1/'), /SSRF blocked/)
+  const ssrfSource = readFileSync(new URL('../src/lib/ssrf.ts', import.meta.url), 'utf8')
+  assert.ok(ssrfSource.includes("import { fetchWithPinnedAddress } from '@/lib/ssrf-pinned'"), 'safeFetch must use the DNS-pinned transport')
+  assert.ok(ssrfSource.includes('await fetchWithPinnedAddress(current,'), 'each outbound hop must connect using the checked DNS answer')
+  assert.ok(!ssrfSource.includes('await fetch(current,'), 'untrusted URLs must not use a separate unpinned fetch')
 })
 
 test('payment initialization and verification fail closed without Paystack credentials', async () => {
