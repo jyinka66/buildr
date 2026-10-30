@@ -47,7 +47,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     model: 'openrouter/free',
     speciality: 'code',
     weight: 9,
-    description: 'OpenAI-compatible multi-provider API. Add your own API key.',
+    description: 'OpenAI-compatible multi-provider API. Configure OPENROUTER_API_KEY or add a key in Settings.',
     baseUrl: 'https://openrouter.ai/api/v1',
   },
   {
@@ -70,11 +70,11 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'google',
     name: 'Google Gemini',
-    model: 'gemini-3.8-flash',
+    model: 'gemini-2.5-flash',
     speciality: 'docs',
     weight: 7,
     description:
-      'Gemini 1.5 Pro. Large context window ideal for documentation analysis.',
+      'Google Gemini API using the OpenAI-compatible endpoint. Configure GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY.',
   },
   {
     key: 'deepseek',
@@ -179,19 +179,50 @@ export async function loadProviders(): Promise<ProviderConfig[]> {
 
   if (error || !rows) return []
   // Ignore legacy Z.ai rows, including the old managed-key configuration.
-  return (rows as LlmProviderRow[]).filter((r) => r.key !== 'zai').map((r) => ({
-    id: r.id,
-    key: r.key as ProviderKey,
-    name: r.name,
-    model: r.model,
-    apiKey: r.api_key,
-    baseUrl: r.base_url,
-    enabled: r.enabled,
-    weight: r.weight,
-    speciality: r.speciality as TaskKind,
-    health: r.health as 'healthy' | 'degraded' | 'down',
-    lastChecked: r.last_checked,
-  }))
+  return (rows as LlmProviderRow[]).filter((r) => r.key !== 'zai').map((r) => {
+    // Render environment variables are the deployment-level source of truth
+    // when a key has not been entered in the provider settings UI. Never
+    // overwrite a database key, so per-provider admin configuration wins.
+    const envKey =
+      r.key === 'google'
+        ? process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+        : r.key === 'openrouter'
+          ? process.env.OPENROUTER_API_KEY
+          : r.key === 'groq'
+            ? process.env.GROQ_API_KEY
+            : r.key === 'openai'
+              ? process.env.OPENAI_API_KEY
+              : r.key === 'anthropic'
+                ? process.env.ANTHROPIC_API_KEY
+                : r.key === 'deepseek'
+                  ? process.env.DEEPSEEK_API_KEY
+                  : undefined
+    const envModel =
+      r.key === 'google'
+        ? process.env.GEMINI_MODEL || process.env.GOOGLE_GEMINI_MODEL
+        : r.key === 'openrouter'
+          ? process.env.OPENROUTER_MODEL
+          : undefined
+    const envBaseUrl =
+      r.key === 'google'
+        ? process.env.GEMINI_BASE_URL || process.env.GOOGLE_GEMINI_BASE_URL
+        : r.key === 'openrouter'
+          ? process.env.OPENROUTER_BASE_URL
+          : undefined
+    return {
+      id: r.id,
+      key: r.key as ProviderKey,
+      name: r.name,
+      model: envModel || r.model,
+      apiKey: r.api_key || envKey || '',
+      baseUrl: r.base_url || envBaseUrl || null,
+      enabled: r.enabled,
+      weight: r.weight,
+      speciality: r.speciality as TaskKind,
+      health: r.health as 'healthy' | 'degraded' | 'down',
+      lastChecked: r.last_checked,
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------
