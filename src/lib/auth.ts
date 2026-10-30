@@ -6,7 +6,7 @@ import { randomBytes } from 'crypto'
 import { db } from '@/lib/db'
 import { syncAdminFlag, isUserAdmin } from '@/lib/admin'
 import { verifyCode, hashBackupCode } from '@/lib/totp'
-import { rateLimit } from '@/lib/rate-limit'
+import { distributedRateLimit } from '@/lib/rate-limit'
 
 // SECURITY: In production, NEXTAUTH_SECRET MUST be set. The hardcoded
 // fallback is for local dev only — if it leaks, anyone can mint valid
@@ -42,7 +42,7 @@ export const authOptions: NextAuthOptions = {
 
         // Limit repeated guesses for the same normalized account identifier.
         // This is process-local; use a shared store for multi-instance deployments.
-        const loginAttempt = rateLimit(`login:${email}`, { limit: 10, windowMs: 15 * 60 * 1000 })
+        const loginAttempt = await distributedRateLimit(`login:${email}`, { limit: 10, windowMs: 15 * 60 * 1000 })
         if (!loginAttempt.ok) return null
 
         const { data: user, error } = await db.from('users').select('id, email, name, password, is_disabled, totp_secret, totp_enabled, totp_backup_codes').eq('email', email).single()
