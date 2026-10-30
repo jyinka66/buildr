@@ -121,6 +121,8 @@ export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promi
         reject(new Error('safe_fetch_unexpected_informational_status'))
         return
       }
+      res.once('end', () => signal?.removeEventListener('abort', abort))
+      res.once('close', () => signal?.removeEventListener('abort', abort))
       const responseBody = status === 204 || status === 304
         ? null
         : Readable.toWeb(res) as ReadableStream<Uint8Array>
@@ -138,7 +140,6 @@ export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promi
     const abort = () => req.destroy(signal?.reason instanceof Error ? signal.reason : new Error('safe_fetch_aborted'))
     if (signal?.aborted) abort()
     else signal?.addEventListener('abort', abort, { once: true })
-    req.once('close', () => signal?.removeEventListener('abort', abort))
     req.once('error', (error) => {
       signal?.removeEventListener('abort', abort)
       reject(error)
