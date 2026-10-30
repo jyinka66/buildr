@@ -1,5 +1,6 @@
 // Billing helper — subscription management + usage tracking + limit enforcement.
 import { db } from '@/lib/db'
+import { isSupabaseConfigured } from '@/lib/supabase-server'
 import { getPlan, type PlanId, type UsageMetric } from '@/lib/plans'
 
 export async function getOrCreateSubscription(userId: string): Promise<{ planId: PlanId }> {
@@ -21,7 +22,14 @@ export async function getOrCreateSubscription(userId: string): Promise<{ planId:
   }
 }
 
-export async function checkLimit(userId: string, metric: UsageMetric): Promise<{ ok: boolean; used: number; limit: number }> {
+export interface LimitReservation {
+  ok: boolean
+  used: number
+  limit: number
+  reservationId?: string
+}
+
+export async function checkLimit(userId: string, metric: UsageMetric): Promise<LimitReservation> {
   let limit = getPlan('free').limits[metric]
   let planId: PlanId
   try {
@@ -29,41 +37,98 @@ export async function checkLimit(userId: string, metric: UsageMetric): Promise<{
     planId = subscription.planId
     limit = getPlan(planId).limits[metric]
   } catch {
-    // Never treat an unavailable subscription database as permission to spend.
     return { ok: false, used: limit, limit }
   }
-  if (limit === -1) return { ok: true, used: 0, limit: -1 }
 
-  const monthStart = new Date()
-  monthStart.setDate(1)
-  monthStart.setHours(0, 0, 0, 0)
-
-  try {
-    const { data: rows, error } = await db.from('usage_events').select('quantity').eq('owner_id', userId).eq('metric', metric).gte('created_at', monthStart.toISOString())
-    if (error || !rows) {
-      console.error('[Buildr] usage lookup failed; denying quota-gated operation:', error?.message || 'missing usage rows')
+  // Local demo mode has no Postgres RPCs; retain its non-production behavior.
+  if (!isSupabaseConfigured && process.env.NODE_ENV !== 'production') {
+    const monthStart = new Date()
+    monthStart.setDate(1)
+    monthStart.setHours(0, 0, 0, 0)
+    try {
+      const { data: rows, error } = await db.from('usage_events').select('quantity').eq('owner_id', userId).eq('metric', metric).gte('created_at', monthStart.toISOString())
+      if (error || !rows) return { ok: false, used: limit, limit }
+      const used = rows.reduce((sum: number, r: { quantity: number }) => sum + r.quantity, 0)
+      return { ok: limit === -1 || used < limit, used, limit }
+    } catch {
       return { ok: false, used: limit, limit }
     }
-    const used = rows.reduce((sum: number, r: { quantity: number }) => sum + r.quantity, 0)
-    return { ok: used < limit, used, limit }
+  }
+
+  try {
+    // LLM usage is measured in tokens, so reserve all remaining monthly
+    // capacity while the generation is in flight. Other metered operations
+    // reserve one unit. The reservation is released/committed after the work.
+    const { data, error } = await db.rpc('reserve_usage', {
+      p_owner_id: userId,
+      p_metric: metric,
+      p_quantity: metric === 'llm_tokens' ? 0 : 1,
+      p_limit: limit,
+    })
+    const row = (Array.isArray(data) ? data[0] : data) as {
+      ok?: boolean
+      used?: number
+      limit_value?: number
+      reserved_quantity?: number
+      reservation_id?: string | null
+    } | null
+    if (error || !row || typeof row.ok !== 'boolean') {
+      console.error('[Buildr] atomic quota reservation failed:', error?.message || 'missing RPC result')
+      return { ok: false, used: limit, limit }
+    }
+    return {
+      ok: row.ok,
+      used: Number(row.used ?? limit),
+      limit: Number(row.limit_value ?? limit),
+      ...(row.reservation_id ? { reservationId: row.reservation_id } : {}),
+    }
   } catch (error) {
-    console.error('[Buildr] usage lookup failed; denying quota-gated operation:', error instanceof Error ? error.message : 'unknown')
+    console.error('[Buildr] atomic quota reservation failed:', error instanceof Error ? error.message : 'unknown')
     return { ok: false, used: limit, limit }
   }
 }
 
-export async function trackUsage(userId: string, metric: UsageMetric, quantity: number = 1, metadata?: { projectId?: string; [k: string]: unknown }): Promise<void> {
-  try {
+export async function trackUsage(
+  userId: string,
+  metric: UsageMetric,
+  quantity: number = 1,
+  metadata?: { projectId?: string; reservationId?: string; [k: string]: unknown },
+): Promise<boolean> {
+  if (!Number.isSafeInteger(quantity) || quantity <= 0) return false
+  const cleanMetadata = { ...(metadata || {}) }
+  delete cleanMetadata.reservationId
+
+  // Local demo mode uses its local store and does not have SQL RPC support.
+  if (!isSupabaseConfigured && process.env.NODE_ENV !== 'production') {
     const { error } = await db.from('usage_events').insert({
       owner_id: userId, metric, quantity,
       project_id: metadata?.projectId || null,
-      metadata: JSON.stringify(metadata || {}),
+      metadata: cleanMetadata,
     })
-    if (error) {
-      console.error('[Buildr] trackUsage insert failed:', error.message)
+    if (error) console.error('[Buildr] trackUsage insert failed:', error.message)
+    return !error
+  }
+
+  try {
+    const { planId } = await getOrCreateSubscription(userId)
+    const limit = getPlan(planId).limits[metric]
+    const { data, error } = await db.rpc('commit_usage_reservation', {
+      p_owner_id: userId,
+      p_metric: metric,
+      p_quantity: quantity,
+      p_limit: limit,
+      p_project_id: metadata?.projectId || null,
+      p_metadata: cleanMetadata,
+      p_reservation_id: metadata?.reservationId || null,
+    })
+    if (error || data !== true) {
+      console.error('[Buildr] usage commit rejected:', error?.message || 'quota reservation expired or actual usage exceeded remaining quota')
+      return false
     }
+    return true
   } catch (err) {
     console.error('[Buildr] trackUsage failed:', err instanceof Error ? err.message : err)
+    return false
   }
 }
 
