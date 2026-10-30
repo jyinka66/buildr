@@ -10,6 +10,8 @@ const compose = readFileSync(new URL('../docker-compose.yml', import.meta.url), 
 test('production runtime routes generated source only to the isolated runner and fails closed when missing', () => {
   assert.match(runtime, /SANDBOX_RUNNER_URL/)
   assert.match(runtime, /SANDBOX_RUNNER_TOKEN/)
+  assert.ok(runtime.includes('ts.transpileModule'), 'local route source must be transpiled with TypeScript')
+  assert.ok(runtime.includes('ts.ModuleKind.CommonJS'), 'local route modules must match the CommonJS execution wrapper')
   assert.match(runtime, /sandbox_not_configured/)
   assert.match(runtime, /fetch\(`\$\{runnerUrl\}\/execute`/)
   assert.match(runtime, /if \(isProduction\) \{[\s\S]*?SANDBOX_RUNNER_URL/)
