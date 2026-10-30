@@ -68,7 +68,7 @@ const BLOCKED_IPV6: Array<[string, number]> = [
   ['3fff::', 20], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8],
 ]
 
-function isBlockedIp(ip: string): boolean {
+export function isBlockedIp(ip: string): boolean {
   const normalized = ip.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0]
   const version = isIP(normalized)
   if (version === 4) return BLOCKED_IPV4.some(([network, prefix]) => inIpv4Cidr(normalized, network, prefix))
