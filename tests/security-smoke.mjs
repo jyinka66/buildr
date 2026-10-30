@@ -36,6 +36,10 @@ test('SSRF transport pins outbound connections to validated public DNS answers',
   assert.ok(pinnedSource.includes('lookup: lookupPinned'), 'socket connection must use the checked address')
   assert.ok(pinnedSource.includes('agent: false'), 'requests must not reuse an unpinned pooled connection')
   assert.ok(pinnedSource.includes('servername: hostname'), 'HTTPS must validate the original hostname')
+  assert.ok(pinnedSource.includes('const MAX_REQUEST_BODY_BYTES = 1_048_576'), 'outbound request bodies must have a strict memory bound')
+  assert.ok(pinnedSource.includes('safe_fetch_request_body_too_large'), 'oversized outbound bodies must be rejected')
+  assert.ok(pinnedSource.includes('readWithAbort(reader, signal)'), 'streaming request bodies must stop when the caller aborts')
+  assert.ok(pinnedSource.includes('bodyToBuffer(init.body, signal)'), 'the request abort signal must reach body buffering')
 })
 
 test('quota and rate-limit enforcement use service-only atomic database RPCs', () => {
