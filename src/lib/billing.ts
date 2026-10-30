@@ -132,6 +132,19 @@ export async function trackUsage(
   }
 }
 
+export async function releaseUsageReservation(userId: string, reservationId?: string): Promise<void> {
+  if (!reservationId || !isSupabaseConfigured || process.env.NODE_ENV !== 'production' && !isSupabaseConfigured) return
+  try {
+    const { error } = await db.rpc('release_usage_reservation', {
+      p_owner_id: userId,
+      p_reservation_id: reservationId,
+    })
+    if (error) console.error('[Buildr] quota reservation release failed:', error.message)
+  } catch (error) {
+    console.error('[Buildr] quota reservation release failed:', error instanceof Error ? error.message : 'unknown')
+  }
+}
+
 export async function getMonthlyUsage(userId: string): Promise<{ plan: PlanId; usage: Record<UsageMetric, { used: number; limit: number; unlimited: boolean }> }> {
   const { planId } = await getOrCreateSubscription(userId)
   const plan = getPlan(planId)
