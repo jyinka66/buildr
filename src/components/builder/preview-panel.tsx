@@ -135,7 +135,7 @@ export function PreviewPanel() {
 
       {/* banner */}
       <div className="border-b border-emerald-500/20 bg-emerald-500/5 px-3 py-1.5 text-[11px] text-emerald-700 dark:text-emerald-400">
-        Interactive preview — React components render live. API routes require export.
+        Safe interactive preview — network/API calls are mocked or blocked. Full-stack execution needs a separate isolated runner.
       </div>
 
       {/* viewport */}

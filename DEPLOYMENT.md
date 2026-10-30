@@ -1,5 +1,7 @@
 # Buildr production deployment (no local terminal required)
 
+> **No budget yet?** Start with the [free launch profile](FREE-LAUNCH.md): one Next.js web app, Supabase free tier, code generation/editing/export, and sandboxed browser previews. The full-stack Render blueprint below uses paid services and a separately hosted execution runner; it is not required for the first MVP.
+
 ## Recommended: Render for the full stack
 
 Render is the simplest target for this repository because the product includes a Next.js server, an API runtime, a WebSocket collaboration service, and an isolated generated-code execution service. The checked-in `render.yaml` defines the services and the Docker build contexts.
