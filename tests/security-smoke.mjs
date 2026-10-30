@@ -49,3 +49,9 @@ test('outgoing webhooks validate public destinations and re-check redirects duri
   assert.ok(webhookRoute.includes("parsedUrl.protocol !== 'https:'"), 'production webhooks must use HTTPS')
   assert.ok(webhookDelivery.includes('safeFetch(url,'), 'delivery must validate every redirect target, not use raw fetch')
 })
+
+test('webhook delivery reads only a bounded response snippet', () => {
+  const source = readFileSync(new URL('../src/lib/webhook.ts', import.meta.url), 'utf8')
+  assert.ok(source.includes('readBoundedResponse(res)'), 'response bodies must not be buffered without a limit')
+  assert.ok(source.includes('reader.cancel()'), 'oversized responses should be cancelled')
+})
