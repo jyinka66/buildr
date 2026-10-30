@@ -29,13 +29,6 @@ async function resolvePublicAddress(hostnameInput: string): Promise<AddressRecor
 
 const MAX_REQUEST_BODY_BYTES = 1_048_576
 
-function ensureBodyWithinLimit(body: Buffer): Buffer {
-  if (body.byteLength > MAX_REQUEST_BODY_BYTES) {
-    throw new Error('safe_fetch_request_body_too_large')
-  }
-  return body
-}
-
 async function readWithAbort(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   signal?: AbortSignal | null,
@@ -45,11 +38,16 @@ async function readWithAbort(
 
   let onAbort: (() => void) | undefined
   const aborted = new Promise<never>((_resolve, reject) => {
+    let settled = false
     onAbort = () => {
+      if (settled) return
+      settled = true
       void reader.cancel(signal.reason).catch(() => {})
       reject(new Error('safe_fetch_aborted'))
     }
     signal.addEventListener('abort', onAbort, { once: true })
+    // Close the race where the signal aborts immediately before listener registration.
+    if (signal.aborted) onAbort()
   })
   try {
     return await Promise.race([reader.read(), aborted])
@@ -64,8 +62,15 @@ async function bodyToBuffer(
 ): Promise<Buffer | undefined> {
   if (body == null) return undefined
   if (signal?.aborted) throw new Error('safe_fetch_aborted')
-  if (typeof body === 'string') return ensureBodyWithinLimit(Buffer.from(body))
-  if (body instanceof URLSearchParams) return ensureBodyWithinLimit(Buffer.from(body.toString()))
+  if (typeof body === 'string') {
+    if (Buffer.byteLength(body) > MAX_REQUEST_BODY_BYTES) throw new Error('safe_fetch_request_body_too_large')
+    return Buffer.from(body)
+  }
+  if (body instanceof URLSearchParams) {
+    const serialized = body.toString()
+    if (Buffer.byteLength(serialized) > MAX_REQUEST_BODY_BYTES) throw new Error('safe_fetch_request_body_too_large')
+    return Buffer.from(serialized)
+  }
   if (body instanceof ArrayBuffer) {
     if (body.byteLength > MAX_REQUEST_BODY_BYTES) throw new Error('safe_fetch_request_body_too_large')
     return Buffer.from(body)
