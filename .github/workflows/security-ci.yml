@@ -1,6 +1,7 @@
 name: Security and build verification
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
