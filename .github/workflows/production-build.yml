@@ -50,6 +50,7 @@ jobs:
       SANDBOX_RUNNER_TOKEN: ci-only-sandbox-token-value-32chars
       SANDBOX_RUNNER_PORT: 3031
       SANDBOX_IMAGE: buildr-sandbox:ci
+      SANDBOX_DEBUG: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -77,6 +78,9 @@ jobs:
         env:
           SANDBOX_TEST_URL: http://127.0.0.1:3031
           SANDBOX_RUNNER_TOKEN: ci-only-sandbox-token-value-32chars
+      - name: Print sandbox runner diagnostics on failure
+        if: failure()
+        run: cat "$RUNNER_TEMP/buildr-sandbox-runner.log"
       - name: Stop sandbox runner
         if: always()
         run: |
