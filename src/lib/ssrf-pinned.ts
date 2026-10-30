@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { Agent } from 'undici'
+import { isBlockedIp } from '@/lib/ssrf'
 
 const BLOCKED = [
   /^0\./, /^10\./, /^127\./, /^169\.254\./, /^192\.168\./,
