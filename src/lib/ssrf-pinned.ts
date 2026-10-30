@@ -33,3 +33,15 @@ export async function createPublicPinnedDispatcher(host: string): Promise<Agent>
   ) => callback(null, address, family)
   return new Agent({ connect: { lookup: pinnedLookup as never } })
 }
+
+export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promise<Response> {
+  const dispatcher = await createPublicPinnedDispatcher(url.hostname)
+  try {
+    const response = await fetch(url, { ...init, dispatcher } as RequestInit)
+    void dispatcher.close().catch(() => {})
+    return response
+  } catch (error) {
+    await dispatcher.destroy().catch(() => {})
+    throw error
+  }
+}
