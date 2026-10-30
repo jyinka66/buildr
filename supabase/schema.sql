@@ -499,6 +499,10 @@ create table if not exists public.snippets (
 );
 create index if not exists idx_snippets_user on public.snippets(user_id);
 
+-- Restrict the pre-existing SECURITY DEFINER helper to database administrators.
+-- The app's server-side service role can manage schema; public clients must not invoke this helper.
+REVOKE ALL ON FUNCTION public.rls_auto_enable() FROM PUBLIC, anon, authenticated;
+
 -- Enable RLS on all tables --------------------------------------------------
 alter table public.users enable row level security;
 alter table public.projects enable row level security;
