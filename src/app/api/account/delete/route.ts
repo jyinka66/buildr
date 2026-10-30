@@ -15,23 +15,21 @@ export async function POST(req: NextRequest) {
     if (!u || !(await bcrypt.compare(password, u.password))) return NextResponse.json({ error: 'Incorrect password.' }, { status: 400 })
     if (u.totp_enabled && (!totpCode || !u.totp_secret || !verifyCode(u.totp_secret, totpCode))) return NextResponse.json({ error: 'Invalid 2FA code.' }, { status: 400 })
 
-    // Keep only a timestamp in the surviving audit record; identifiers and
-    // email addresses would make this record pseudonymous, not anonymous.
+    // Delete first so a failed delete cannot leave a false audit event.
     const deletedAt = new Date().toISOString()
-    const { error: auditError } = await db.from('audit_log').insert({
-      user_id: null,
-      action: 'account.delete',
-      details: JSON.stringify({ deletedAt }),
-    })
-    if (auditError) {
-      return NextResponse.json({ error: 'account_deletion_audit_failed' }, { status: 500 })
-    }
-
-    // Delete the user (cascade deletes everything) and report failure honestly.
     const { error: deleteError } = await db.from('users').delete().eq('id', user.id)
     if (deleteError) {
       return NextResponse.json({ error: 'account_deletion_failed' }, { status: 500 })
     }
+
+    // Best-effort anonymous audit record: never retain the deleted user's
+    // email or identifier, and don't misreport a successful deletion if
+    // this secondary audit write is unavailable.
+    await db.from('audit_log').insert({
+      user_id: null,
+      action: 'account.delete',
+      details: JSON.stringify({ deletedAt }),
+    }).then(() => undefined).catch(() => undefined)
     return NextResponse.json({ ok: true, message: 'Account permanently deleted.', deletedAt })
   } catch (err) {
     if ((err as { status?: number }).status === 401) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
