@@ -7,6 +7,7 @@ import { db } from '@/lib/db'
 import { syncAdminFlag, isUserAdmin } from '@/lib/admin'
 import { verifyCode, hashBackupCode } from '@/lib/totp'
 import { distributedRateLimit } from '@/lib/distributed-rate-limit'
+import { trustedClientIp } from '@/lib/rate-limit'
 
 // SECURITY: In production, NEXTAUTH_SECRET MUST be set. The hardcoded
 // fallback is for local dev only — if it leaks, anyone can mint valid
@@ -34,11 +35,24 @@ export const authOptions: NextAuthOptions = {
     CredentialsProvider({
       name: 'Credentials',
       credentials: { email: { label: 'Email', type: 'email' }, password: { label: 'Password', type: 'password' }, totpCode: { label: '2FA Code', type: 'text' } },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         const email = credentials?.email?.trim().toLowerCase()
         const password = credentials?.password ?? ''
         const totpCode = credentials?.totpCode?.trim() ?? ''
         if (!email || !password) return null
+
+        // Apply an IP bucket only when the deployment explicitly trusts its
+        // reverse proxy headers. Never let a caller spoof their own IP bucket.
+        const requestHeaders = new Headers()
+        const forwardedFor = req.headers['x-forwarded-for']
+        const realIp = req.headers['x-real-ip']
+        if (typeof forwardedFor === 'string') requestHeaders.set('x-forwarded-for', forwardedFor)
+        if (typeof realIp === 'string') requestHeaders.set('x-real-ip', realIp)
+        const clientIp = trustedClientIp(requestHeaders)
+        if (clientIp !== 'unknown' && clientIp !== 'development') {
+          const ipAttempt = await distributedRateLimit(`login-ip:${clientIp}`, { limit: 30, windowMs: 15 * 60 * 1000 })
+          if (!ipAttempt.ok) return null
+        }
 
         // Limit repeated guesses for the same normalized account identifier.
         // The counter is stored in Postgres so attempts are shared across app instances.
