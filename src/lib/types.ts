@@ -52,6 +52,8 @@ export interface ProjectView {
   fileCount: number
   createdAt: string
   updatedAt: string
+  /** Public read-only sharing is opt-in and controlled by the project owner. */
+  isPublic?: boolean
 }
 
 export interface FileView {
