@@ -78,6 +78,13 @@ begin
     for update;
     v_has_reservation := found;
     if not v_has_reservation then return false; end if;
+  else
+    -- Existing callers may omit the reservation ID; consume one matching
+    -- reservation under the same advisory lock rather than double-counting it.
+    select * into v_reservation from public.quota_reservations
+    where owner_id = p_owner_id and metric = p_metric and expires_at > now()
+    order by created_at limit 1 for update skip locked;
+    v_has_reservation := found;
   end if;
   if p_limit <> -1 then
     select coalesce(sum(quantity),0)::integer into v_used from public.usage_events
