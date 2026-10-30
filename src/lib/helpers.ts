@@ -83,6 +83,8 @@ export interface ProjectDbRow {
   status: string
   preview_url: string | null
   deployment_url: string | null
+  is_public?: boolean
+  share_slug?: string | null
   owner_id: string
   workspace_id: string | null
   created_at: string
