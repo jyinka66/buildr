@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomBytes } from 'crypto'
 import { db } from '@/lib/db'
 import { sendEmail, passwordResetHtml } from '@/lib/email'
-import { distributedRateLimit, rateLimitedResponse, trustedClientIp } from '@/lib/rate-limit'
+import { distributedRateLimit } from '@/lib/distributed-rate-limit'
+import { rateLimitedResponse, trustedClientIp } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
   const ip = trustedClientIp(req.headers)
