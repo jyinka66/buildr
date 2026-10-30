@@ -22,6 +22,8 @@ test('sandbox runner enforces disposable no-network container and resource restr
     assert.ok(runner.includes(control), `missing sandbox control: ${control}`)
   }
   assert.match(runner, /docker\(\['kill', id\]/)
+  assert.ok(runner.includes('readLimited(req.body, MAX_INPUT_BYTES)'), 'request bodies must be capped while streaming')
+  assert.ok(!runner.includes('const raw = await req.text()'), 'must not buffer unbounded request bodies before checking size')
   assert.match(runner, /x-buildr-sandbox-token/)
   assert.doesNotMatch(runner, /req\.json\(\).*image|payload\.image|payload\.command/)
 })
