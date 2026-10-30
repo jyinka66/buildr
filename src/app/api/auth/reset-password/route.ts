@@ -16,8 +16,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
   }
   const { token, password } = body
-  if (!token || !password) {
-    return NextResponse.json({ error: 'token and password are required.' }, { status: 400 })
+  if (typeof token !== 'string' || !/^[a-f0-9]{64}$/i.test(token) || typeof password !== 'string' || !password) {
+    return NextResponse.json({ error: 'A valid token and password are required.' }, { status: 400 })
   }
   if (password.length < 8 || Buffer.byteLength(password, 'utf8') > 72) {
     return NextResponse.json({ error: 'Password must be at least 8 characters and no more than 72 UTF-8 bytes.' }, { status: 400 })
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   }
 
   const hash = await bcrypt.hash(password, 10)
-  const { error: updateError } = await db
+  const { data: updatedUser, error: updateError } = await db
     .from('users')
     .update({
       password: hash,
@@ -50,8 +50,11 @@ export async function POST(req: NextRequest) {
     })
     .eq('id', user.id)
     .eq('reset_token', token)
+    .select('id')
+    .maybeSingle()
 
   if (updateError) return NextResponse.json({ error: 'password_reset_update_failed' }, { status: 500 })
+  if (!updatedUser) return NextResponse.json({ error: 'Reset token has already been used.' }, { status: 409 })
   await audit('user.password_reset', { email: user.email }, user.id)
 
   return NextResponse.json({ ok: true, message: 'Password reset. You can now sign in.' })
