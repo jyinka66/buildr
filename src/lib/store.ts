@@ -200,8 +200,10 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     set({ authLoading: true, authError: null })
     try {
       await api.register(input)
-      const loginOk = await get().login(input.email, input.password)
-      return loginOk
+      // Registration never establishes a session. The user must follow the
+      // single-use verification link before credentials sign-in can succeed.
+      set({ authMode: 'login', authOpen: true, authError: null })
+      return true
     } catch (err) {
       const message = err instanceof Error ? err.message : 'register_failed'
       set({ authError: message })
