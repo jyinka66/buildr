@@ -18,6 +18,9 @@ test('production build creates a standalone server and static assets', async () 
   assert.match(pkg.scripts.build, /postbuild-standalone/)
   assert.match(pkg.scripts.start, /\.next\/standalone\/server\.js/)
   await access(new URL('scripts/postbuild-standalone.mjs', root))
+  const dockerfile = await read('Dockerfile')
+  assert.match(dockerfile, /FROM node:22-alpine AS builder/)
+  assert.match(dockerfile, /node \.\/node_modules\/next\/dist\/bin\/next build/)
 })
 
 test('Render blueprint includes web, API, sandbox and collaboration services', async () => {

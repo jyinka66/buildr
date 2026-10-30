@@ -4,13 +4,13 @@ WORKDIR /app
 COPY package.json bun.lock .npmrc ./
 RUN bun install --frozen-lockfile
 
-FROM oven/bun:1.3.4-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN bun run build
+RUN node ./node_modules/next/dist/bin/next build && node scripts/postbuild-standalone.mjs
 
 FROM node:22-alpine AS runner
 WORKDIR /app
