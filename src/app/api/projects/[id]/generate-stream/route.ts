@@ -202,7 +202,7 @@ export async function POST(
         // Never parse or persist partial JSON after an upstream stream failure.
         if (streamFailure) throw new Error(streamFailure)
 
-        send({ type: 'status', message: 'Applying file changes…' )
+        send({ type: 'status', message: 'Applying file changes…' })
 
         // Parse files from the LLM response.
         const llmFiles = extractFilesFromText(fullContent)
