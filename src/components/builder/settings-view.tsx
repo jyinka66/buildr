@@ -62,7 +62,10 @@ import { IntegrationMarketplace } from '@/components/builder/integration-marketp
 type ProviderRow = ProviderConfig & { hasKey: boolean }
 
 const providerIcon: Record<ProviderKey, LucideIcon> = {
+  // Legacy key retained for type/database compatibility; router excludes it.
   zai: Sparkles,
+  groq: Zap,
+  openrouter: Globe,
   openai: Circle,
   anthropic: Box,
   google: Globe,
