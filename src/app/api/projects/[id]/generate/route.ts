@@ -10,7 +10,7 @@ import {
 } from '@/lib/helpers'
 import { requireSessionUser } from '@/lib/session'
 import { checkLimit, releaseUsageReservation, trackUsage } from '@/lib/billing'
-import { distributedRateLimit } from '@/lib/rate-limit'
+import { distributedRateLimit } from '@/lib/distributed-rate-limit'
 import type { StackKey, StylingKey } from '@/lib/types'
 
 interface ProjectFileRow {
