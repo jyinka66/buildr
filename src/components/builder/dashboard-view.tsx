@@ -16,6 +16,7 @@ import {
   FileCode2,
   FolderGit2,
   Layers,
+  Link2,
   Loader2,
   MoreVertical,
   Plus,
@@ -25,6 +26,7 @@ import {
 
 import { useBuilder } from '@/lib/store'
 import type { ProjectView } from '@/lib/types'
+import { api } from '@/lib/api-client'
 
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -334,6 +336,30 @@ function ProjectCard({
   onOpen: () => void
   onDelete: () => void
 }) {
+  const [sharing, setSharing] = React.useState(false)
+  const [shareError, setShareError] = React.useState<string | null>(null)
+
+  async function togglePublicSharing() {
+    setSharing(true)
+    setShareError(null)
+    try {
+      const result = await api.setProjectPublic(project.id, !project.isPublic)
+      useBuilder.setState((state) => ({
+        projects: state.projects.map((item) => item.id === project.id ? { ...item, isPublic: result.isPublic } : item),
+      }))
+      if (result.isPublic && result.shareUrl && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(result.shareUrl)
+        } catch {
+          window.prompt('Copy your public project link', result.shareUrl)
+        }
+      }
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : 'Could not update public sharing.')
+    } finally {
+      setSharing(false)
+    }
+  }
   const status = STATUS_BADGE[project.status]
   const updatedLabel = React.useMemo(() => {
     try {
@@ -420,6 +446,12 @@ function ProjectCard({
                   <Download className="h-4 w-4" />
                   Export ZIP
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => void togglePublicSharing()} disabled={sharing}>
+                  <Link2 className="h-4 w-4" />
+                  {sharing ? 'Updating public link…' : project.isPublic ? 'Disable public link' : 'Enable public link'}
+                </DropdownMenuItem>
+                {shareError && <DropdownMenuItem disabled>{shareError}</DropdownMenuItem>}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onSelect={onDelete}>
                   <Trash2 className="h-4 w-4" />
