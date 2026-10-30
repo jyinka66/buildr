@@ -31,7 +31,7 @@ test('Render blueprint includes web, API, sandbox and collaboration services', a
   const sandboxService = config.match(/  - type: pserv\n([\s\S]*?)(?=\n  - type:|\s*$)/)?.[1]
   assert.ok(sandboxService, 'missing private sandbox-runner service')
   assert.ok(!sandboxService.includes('healthCheckPath:'), 'Render healthCheckPath is only supported for web services')
-  const apiService = config.match(/  - type: web\n    name: buildr-api-runtime\n([\\s\\S]*?)(?=\n  - type:|\\s*$)/)?.[1]
+  const apiService = config.match(/  - type: web\n    name: buildr-api-runtime\n([\s\S]*?)(?=\n  - type:|\s*$)/)?.[1]
   assert.ok(apiService, 'missing API runtime service')
   assert.ok(apiService.includes('SUPABASE_ANON_KEY'))
   assert.ok(!apiService.includes('SUPABASE_SERVICE_ROLE_KEY'), 'API runtime must not receive the service-role secret')
