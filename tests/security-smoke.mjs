@@ -169,7 +169,7 @@ test('public project visibility is owner-controlled and opt-in in the dashboard'
   assert.ok(shareRoute.includes('project.owner_id !== user.id'), 'only project owners may change sharing')
   assert.ok(shareRoute.includes('.eq(\'owner_id\', user.id)'), 'update must be scoped to the authenticated owner')
   assert.ok(shareRoute.includes('randomBytes(16)'), 'public share links must use a high-entropy unguessable slug')
-  assert.ok(shareRoute.includes('body?.enable === true'), 'public sharing must be explicitly opted into')
+  assert.ok(shareRoute.includes('typeof body.enable !== \'boolean\''), 'public sharing must require an explicit boolean opt-in or opt-out')
   assert.ok(projectList.includes('isPublic: r.is_public === true'), 'owner project list must expose sharing state')
   assert.ok(apiClient.includes('setProjectPublic'), 'frontend must call the owner-protected sharing endpoint')
   assert.ok(dashboard.includes('Enable public link') && dashboard.includes('Disable public link'), 'dashboard must expose an explicit visibility toggle')
