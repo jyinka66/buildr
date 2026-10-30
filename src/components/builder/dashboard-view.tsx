@@ -447,7 +447,7 @@ function ProjectCard({
                   <Link2 className="h-4 w-4" />
                   {sharing ? 'Updating public link…' : project.isPublic ? 'Disable public link' : 'Enable public link'}
                 </DropdownMenuItem>
-                {shareError && <div role="alert" className="max-w-56 px-2 py-1 text-xs text-destructive">{shareError}</div>}
+                {shareError && <DropdownMenuItem disabled>{shareError}</DropdownMenuItem>}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" onSelect={onDelete}>
                   <Trash2 className="h-4 w-4" />
