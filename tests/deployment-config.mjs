@@ -25,7 +25,12 @@ test('Render blueprint includes web, API, sandbox and collaboration services', a
   for (const service of ['buildr-web', 'buildr-api-runtime', 'buildr-sandbox-runner', 'buildr-collab']) {
     assert.ok(config.includes(`name: ${service}`), `missing ${service}`)
   }
-  assert.ok(config.includes('dockerContext: mini-services/api-runtime'))
+  // Render resolves Dockerfile/context paths relative to each service's rootDir.
+  assert.equal((config.match(/dockerfilePath: Dockerfile/g) || []).length, 3)
+  assert.equal((config.match(/dockerContext: \./g) || []).length, 3)
+  const sandboxService = config.match(/  - type: pserv\n([\s\S]*?)(?=\n  - type:|\s*$)/)?.[1]
+  assert.ok(sandboxService, 'missing private sandbox-runner service')
+  assert.ok(!sandboxService.includes('healthCheckPath:'), 'Render healthCheckPath is only supported for web services')
   assert.ok(config.includes('DOCKER_CLIENT_KEY_PEM'))
   assert.ok(config.includes('SANDBOX_RUNNER_TOKEN'))
 })
