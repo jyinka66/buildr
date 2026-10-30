@@ -36,8 +36,9 @@ test('router prefers explicit valid override, then task speciality, general, and
   assert.deepEqual(rankProviders(providers, 'code').map((p) => p.key), [
     'zai', 'anthropic', 'deepseek', 'openai', 'google',
   ])
+  // Task speciality first, then the 'general' provider, then everything else by weight.
   assert.deepEqual(rankProviders(providers, 'docs').map((p) => p.key), [
-    'google', 'zai', 'deepseek', 'anthropic', 'openai',
+    'google', 'deepseek', 'zai', 'anthropic', 'openai',
   ])
   assert.equal(rankProviders(providers, 'code', 'anthropic')[0].key, 'anthropic')
   assert.equal(rankProviders(providers, 'code', 'ollama')[0].key, 'zai')
