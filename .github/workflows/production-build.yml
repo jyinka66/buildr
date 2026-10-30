@@ -39,6 +39,7 @@ jobs:
       - run: bun run typecheck
       - run: npm run test:security
       - run: npm run test:sandbox
+      - run: npm run test:deployment
 
   docker-build:
     runs-on: ubuntu-latest
