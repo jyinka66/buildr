@@ -1,6 +1,6 @@
 // Pure routing policy shared by normal and streaming completions.
 // A provider is routable only when enabled, not marked offline, and configured.
-// Every hosted provider, including Z.ai, requires a real server-side credential.
+// Every hosted provider requires a real server-side credential.
 export interface RoutingProvider {
   id: string
   key: string
@@ -35,7 +35,7 @@ export function rankProviders<T extends RoutingProvider>(
     add(eligible.filter((provider) => provider.key === overrideKey))
   }
   add(eligible.filter((provider) => provider.speciality === task).sort(byWeight))
-  add(eligible.filter((provider) => provider.speciality === 'general' || provider.key === 'zai').sort(byWeight))
+  add(eligible.filter((provider) => provider.speciality === 'general').sort(byWeight))
   // Remaining configured providers are failover candidates, ordered by weight.
   add(eligible.slice().sort(byWeight))
   return ranked
