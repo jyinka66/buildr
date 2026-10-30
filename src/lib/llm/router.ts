@@ -329,7 +329,9 @@ async function runOpenAICompat(
       model: provider.model,
       messages,
       temperature: options.temperature ?? 0.4,
-      max_tokens: options.maxTokens ?? 4096,
+      ...(provider.key === 'openai'
+        ? { max_completion_tokens: options.maxTokens ?? 4096 }
+        : { max_tokens: options.maxTokens ?? 4096 }),
     }),
     signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
   })
@@ -541,7 +543,9 @@ async function* runOpenAICompatStream(
       model: provider.model,
       messages,
       temperature: options.temperature ?? 0.4,
-      max_tokens: options.maxTokens ?? 4096,
+      ...(provider.key === 'openai'
+        ? { max_completion_tokens: options.maxTokens ?? 4096 }
+        : { max_tokens: options.maxTokens ?? 4096 }),
       stream: true,
     }),
     signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
