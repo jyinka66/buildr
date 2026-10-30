@@ -65,7 +65,19 @@ export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promi
   }
 
   const hostname = url.hostname.replace(/^\[|\]$/g, '')
-  const address = await resolvePublicAddress(hostname)
+  const signal = init.signal
+  if (signal?.aborted) throw new Error('safe_fetch_aborted')
+  let abortDns: (() => void) | undefined
+  const address = await Promise.race([
+    resolvePublicAddress(hostname),
+    ...(signal ? [new Promise<never>((_resolve, reject) => {
+      abortDns = () => reject(new Error('safe_fetch_aborted'))
+      signal.addEventListener('abort', abortDns, { once: true })
+    })] : []),
+  ]).finally(() => {
+    if (signal && abortDns) signal.removeEventListener('abort', abortDns)
+  })
+  if (signal?.aborted) throw new Error('safe_fetch_aborted')
   const body = await bodyToBuffer(init.body)
   const headers = new Headers(init.headers)
   // Let Node build Host from the validated URL authority, not a caller header.
