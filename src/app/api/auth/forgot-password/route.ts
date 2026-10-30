@@ -3,11 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomBytes } from 'crypto'
 import { db } from '@/lib/db'
 import { sendEmail, passwordResetHtml } from '@/lib/email'
-import { rateLimit, rateLimitedResponse, trustedClientIp } from '@/lib/rate-limit'
+import { distributedRateLimit, rateLimitedResponse, trustedClientIp } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
   const ip = trustedClientIp(req.headers)
-  const rl = rateLimit(`forgot:${ip}`, { limit: 3, windowMs: 600_000 })
+  const rl = await distributedRateLimit(`forgot:${ip}`, { limit: 3, windowMs: 600_000 })
   if (!rl.ok) return rateLimitedResponse(rl.resetMs)
 
   const { email } = (await req.json()) as { email?: string }
