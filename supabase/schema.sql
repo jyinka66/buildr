@@ -787,8 +787,8 @@ CREATE POLICY project_files_public_preview_read
 -- ============================================================================
 -- Atomic quota reservations and distributed rate limits
 -- ============================================================================
--- Internal tables intentionally have no client policies: only the server-side
--- service_role may use the narrowly granted RPC functions.
+-- Internal tables have service_role-only policies and no client grants; only
+-- server-side RPCs can use these counters and reservations.
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 grant usage on schema private to service_role;
