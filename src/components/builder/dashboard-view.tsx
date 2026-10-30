@@ -26,6 +26,7 @@ import {
 
 import { useBuilder } from '@/lib/store'
 import type { ProjectView } from '@/lib/types'
+import { api } from '@/lib/api-client'
 
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -342,12 +343,12 @@ function ProjectCard({
     setSharing(true)
     setShareError(null)
     try {
-      const result = await (await import('@/lib/api-client')).api.setProjectPublic(project.id, !project.isPublic)
+      const result = await api.setProjectPublic(project.id, !project.isPublic)
       useBuilder.setState((state) => ({
         projects: state.projects.map((item) => item.id === project.id ? { ...item, isPublic: result.isPublic } : item),
       }))
       if (result.isPublic && result.shareUrl && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(result.shareUrl)
+        try { await navigator.clipboard.writeText(result.shareUrl) } catch { /* sharing succeeded; clipboard may be unavailable */ }
       }
     } catch (error) {
       setShareError(error instanceof Error ? error.message : 'Could not update public sharing.')
