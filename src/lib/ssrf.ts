@@ -1,6 +1,5 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
-import { fetchWithPinnedAddress } from '@/lib/ssrf-pinned'
 
 export interface SsrfCheckResult {
   ok: boolean
@@ -134,7 +133,7 @@ export async function safeFetch(
     for (let redirectCount = 0; ; redirectCount++) {
       const check = await isUrlSafe(current.toString())
       if (!check.ok) throw new Error(`SSRF blocked: ${check.reason}`)
-      const response = await fetchWithPinnedAddress(current, { ...init, method, body, headers, redirect: 'manual', signal: controller.signal })
+      const response = await fetch(current, { ...init, method, body, headers, redirect: 'manual', signal: controller.signal })
       if (![301, 302, 303, 307, 308].includes(response.status)) return response
 
       const location = response.headers.get('location')
