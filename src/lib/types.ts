@@ -5,7 +5,9 @@
 export type StackKey = 'nextjs' | 'node-express' | 'react-vite' | 'static-html'
 export type StylingKey = 'tailwind' | 'bootstrap' | 'plain'
 export type ProviderKey =
-  | 'zai'
+  | 'zai' // legacy DB rows are ignored by the router
+  | 'groq'
+  | 'openrouter'
   | 'openai'
   | 'anthropic'
   | 'google'
