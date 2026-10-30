@@ -40,6 +40,11 @@ export const authOptions: NextAuthOptions = {
         const totpCode = credentials?.totpCode?.trim() ?? ''
         if (!email || !password) return null
 
+        // Limit repeated guesses for the same normalized account identifier.
+        // This is process-local; use a shared store for multi-instance deployments.
+        const loginAttempt = rateLimit(`login:${email}`, { limit: 10, windowMs: 15 * 60 * 1000 })
+        if (!loginAttempt.ok) return null
+
         const { data: user, error } = await db.from('users').select('id, email, name, password, is_disabled, totp_secret, totp_enabled, totp_backup_codes').eq('email', email).single()
         if (error || !user || !user.password) return null
         if (user.is_disabled) return null
