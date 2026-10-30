@@ -76,7 +76,7 @@ export function BuilderWorkspace() {
   const builderTab = useBuilder((s) => s.builderTab)
   const setBuilderTab = useBuilder((s) => s.setBuilderTab)
   const closeProject = useBuilder((s) => s.closeProject)
-  const generate = useBuilder((s) => s.generate)
+  const converse = useBuilder((s) => s.converse)
 
   const isMobile = useIsMobile()
 
@@ -206,11 +206,11 @@ export function BuilderWorkspace() {
       {/* main */}
       <div className="min-h-0 flex-1">
         {isMobile ? (
-          <MobileLayout builderTab={builderTab} onSend={(m) => void generate(m)} />
+          <MobileLayout builderTab={builderTab} onSend={(m) => void converse(m)} />
         ) : (
           <ResizablePanelGroup direction="horizontal" className="h-full">
             <ResizablePanel defaultSize={32} minSize={22} maxSize={45} className="min-w-[320px]">
-              <ChatPanel onSend={(m) => void generate(m)} />
+              <ChatPanel onSend={(m) => void converse(m)} />
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={68} minSize={40}>

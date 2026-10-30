@@ -49,6 +49,7 @@ import {
   KeyRound,
   LayoutDashboard,
   LifeBuoy,
+  MessageSquare,
   LogOut,
   Megaphone,
   Rocket,
@@ -94,6 +95,7 @@ function useNavGroups() {
       label: 'Workspace',
       items: [
         { icon: LayoutDashboard, label: 'Dashboard', view: 'dashboard', action: s.openDashboard },
+        { icon: MessageSquare, label: 'AI Chat', view: 'chat', action: s.openChat },
       ],
     },
     {

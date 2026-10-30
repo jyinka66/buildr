@@ -16,6 +16,7 @@ import type {
   TaskKind,
 } from '@/lib/types'
 import { rankProviders } from '@/lib/llm/routing-policy'
+import { ThinkTagParser, type StreamPiece } from '@/lib/llm/think-parser'
 
 // ---------------------------------------------------------------------------
 // Built-in provider catalogue. These are the defaults seeded into the DB.
@@ -271,6 +272,14 @@ export interface CompletionOptions {
   maxTokens?: number
   // If true, the router will fall over to the next provider on failure.
   failover?: boolean
+  // Conversational chat only. When true the stream also surfaces the model's
+  // reasoning (separate reasoning fields, <think> tags, Anthropic extended
+  // thinking) as 'thinking' events and uses the longer chat timeout. Code
+  // generation never sets this, so its requests and output are unchanged.
+  reasoning?: boolean
+  // Aborts the upstream request (e.g. the user pressed Stop). An aborted
+  // stream is not counted as a provider failure.
+  signal?: AbortSignal
 }
 
 export interface CompletionResult {
@@ -290,6 +299,24 @@ export interface CompletionResult {
 // Default timeout for all LLM HTTP calls (30s). Prevents a slow provider
 // from hanging the generation indefinitely.
 const LLM_TIMEOUT_MS = 120_000
+
+// Conversational streams can legitimately run longer (reasoning + long
+// answers), so they get a larger ceiling. Code generation keeps the value above.
+const CHAT_STREAM_TIMEOUT_MS = 300_000
+
+// Token budget for Anthropic extended thinking in chat mode.
+const ANTHROPIC_THINKING_BUDGET = 4000
+
+// Claude models that support extended thinking. If a model is not listed,
+// or the API rejects the parameter, chat simply runs without visible thinking.
+function supportsAnthropicThinking(model: string): boolean {
+  return /claude-(?:3-7|(?:opus|sonnet|haiku|fable|mythos)-[4-9])/i.test(model)
+}
+
+function requestSignal(options: CompletionOptions): AbortSignal {
+  const timeout = AbortSignal.timeout(options.reasoning ? CHAT_STREAM_TIMEOUT_MS : LLM_TIMEOUT_MS)
+  return options.signal ? AbortSignal.any([timeout, options.signal]) : timeout
+}
 
 async function runOpenAICompat(
   messages: ChatMessage[],
@@ -432,6 +459,7 @@ export async function complete(
 
 export type StreamEvent =
   | { type: 'token'; content: string }
+  | { type: 'thinking'; content: string }
   | { type: 'status'; message: string }
   | { type: 'done'; provider: ProviderConfig; tokens: number; durationMs: number; fullContent: string }
   | { type: 'error'; message: string }
@@ -441,7 +469,7 @@ async function* runOpenAICompatStream(
   messages: ChatMessage[],
   options: CompletionOptions,
   provider: ProviderConfig,
-): AsyncGenerator<string> {
+): AsyncGenerator<StreamPiece> {
   const base =
     provider.baseUrl ||
     (provider.key === 'groq'
@@ -461,23 +489,33 @@ async function* runOpenAICompatStream(
   if (provider.key === 'anthropic') {
     const system = messages.find((m) => m.role === 'system')?.content ?? ''
     const conversation = messages.filter((m) => m.role !== 'system')
-    const res = await fetch(`${base}/messages`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'text/event-stream',
-        'x-api-key': provider.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: provider.model,
-        max_tokens: options.maxTokens ?? 4096,
-        system,
-        messages: conversation.map((m) => ({ role: m.role, content: m.content })),
-        stream: true,
-      }),
-      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
-    })
+    const thinkingEnabled = !!options.reasoning && supportsAnthropicThinking(provider.model)
+    const sendAnthropic = (withThinking: boolean) =>
+      fetch(`${base}/messages`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'text/event-stream',
+          'x-api-key': provider.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          max_tokens: withThinking
+            ? Math.max(options.maxTokens ?? 4096, ANTHROPIC_THINKING_BUDGET + 2048)
+            : options.maxTokens ?? 4096,
+          system,
+          messages: conversation.map((m) => ({ role: m.role, content: m.content })),
+          stream: true,
+          ...(withThinking
+            ? { thinking: { type: 'enabled', budget_tokens: ANTHROPIC_THINKING_BUDGET } }
+            : {}),
+        }),
+        signal: requestSignal(options),
+      })
+    let res = await sendAnthropic(thinkingEnabled)
+    // A model that rejects the thinking parameter should still answer.
+    if (!res.ok && thinkingEnabled && res.status === 400) res = await sendAnthropic(false)
     if (!res.ok || !res.body) {
       const detail = (await res.text().catch(() => '')).slice(0, 500)
       throw new Error(`Anthropic stream error ${res.status}${detail ? `: ${detail}` : ''}`)
@@ -499,7 +537,14 @@ async function* runOpenAICompatStream(
         try {
           const json = JSON.parse(data)
           if (json.type === 'content_block_delta' && json.delta?.type === 'text_delta' && json.delta.text) {
-            yield json.delta.text
+            yield { kind: 'text', text: json.delta.text }
+          } else if (
+            options.reasoning &&
+            json.type === 'content_block_delta' &&
+            json.delta?.type === 'thinking_delta' &&
+            json.delta.thinking
+          ) {
+            yield { kind: 'thinking', text: json.delta.thinking }
           }
         } catch {
           // Ignore non-JSON keepalives and unrelated SSE frames.
@@ -524,12 +569,16 @@ async function* runOpenAICompatStream(
         : { max_tokens: options.maxTokens ?? 4096 }),
       stream: true,
     }),
-    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+    signal: requestSignal(options),
   })
   if (!res.ok || !res.body) {
     const detail = (await res.text().catch(() => '')).slice(0, 500)
     throw new Error(`${provider.name} stream error ${res.status}${detail ? `: ${detail}` : ''}`)
   }
+
+  // Chat mode only: split inline <think> blocks and read separate reasoning
+  // fields. Code generation (reasoning off) takes the original path below.
+  const thinkParser = options.reasoning ? new ThinkTagParser() : null
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -543,17 +592,28 @@ async function* runOpenAICompatStream(
     for (const line of lines) {
       if (line.startsWith('data: ')) {
         const data = line.slice(6).trim()
-        if (data === '[DONE]') return
+        if (data === '[DONE]') {
+          if (thinkParser) yield* thinkParser.flush()
+          return
+        }
         try {
           const json = JSON.parse(data)
-          const delta = json.choices?.[0]?.delta?.content
-          if (delta) yield delta
+          const choiceDelta = json.choices?.[0]?.delta
+          const delta = choiceDelta?.content
+          if (thinkParser) {
+            const reasoning = choiceDelta?.reasoning_content ?? choiceDelta?.reasoning
+            if (typeof reasoning === 'string' && reasoning) yield { kind: 'thinking', text: reasoning }
+            if (typeof delta === 'string' && delta) yield* thinkParser.feed(delta)
+          } else if (delta) {
+            yield { kind: 'text', text: delta }
+          }
         } catch {
           // Skip malformed lines.
         }
       }
     }
   }
+  if (thinkParser) yield* thinkParser.flush()
 }
 
 // Public streaming entry point. Selects a provider, yields token events,
@@ -576,12 +636,18 @@ export async function* completeStream(
   for (const provider of candidates) {
     const start = Date.now()
     let fullContent = ''
+    let emitted = false
     try {
-      const tokenStream = runOpenAICompatStream(messages, options, provider)
+      const pieceStream = runOpenAICompatStream(messages, options, provider)
 
-      for await (const token of tokenStream) {
-        fullContent += token
-        yield { type: 'token', content: token }
+      for await (const piece of pieceStream) {
+        emitted = true
+        if (piece.kind === 'thinking') {
+          yield { type: 'thinking', content: piece.text }
+          continue
+        }
+        fullContent += piece.text
+        yield { type: 'token', content: piece.text }
       }
       if (!fullContent.trim()) throw new Error(`${provider.name} returned an empty stream.`)
 
@@ -592,12 +658,14 @@ export async function* completeStream(
       yield { type: 'done', provider, tokens, durationMs: Date.now() - start, fullContent }
       return
     } catch (err) {
+      // A client-initiated stop (Stop button / handoff) is not a provider failure.
+      if (options.signal?.aborted) return
       lastErr = err
       await markProviderHealth(provider.id, 'degraded')
       // Retrying after output has reached the client would duplicate or corrupt
       // generated files. Fail over only when the provider failed before its
       // first token; otherwise report the partial-stream failure clearly.
-      if (fullContent.length > 0 || !failover) {
+      if (emitted || !failover) {
         yield {
           type: 'error',
           message: err instanceof Error ? err.message : 'stream_failed',

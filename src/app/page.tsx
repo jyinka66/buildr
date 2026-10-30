@@ -25,6 +25,7 @@ import WorkspacesView from '@/components/builder/workspaces-view'
 import AdminView from '@/components/builder/admin-view'
 import OnboardingView from '@/components/builder/onboarding-view'
 import AnalyticsView from '@/components/builder/analytics-view'
+import AiChatView from '@/components/builder/ai-chat-view'
 import { SharedProjectView } from '@/components/builder/shared-project-view'
 import { AuthDialog } from '@/components/builder/auth-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -168,6 +169,7 @@ export default function Home() {
     switch (view) {
       case 'landing': return <LandingView />
       case 'dashboard': return <DashboardView />
+      case 'chat': return <AiChatView />
       case 'builder': return <BuilderWorkspace />
       case 'settings': return <SettingsView />
       case 'business': return <BusinessLaunchView />

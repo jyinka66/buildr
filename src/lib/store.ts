@@ -6,6 +6,7 @@
 
 import { create } from 'zustand'
 import { api, type CreateProjectInput, type SessionInfo } from '@/lib/api-client'
+import { streamChat } from '@/lib/chat-client'
 import type {
   FileView,
   GenerationView,
@@ -14,8 +15,14 @@ import type {
   ProviderConfig,
 } from '@/lib/types'
 
-export type View = 'landing' | 'dashboard' | 'builder' | 'settings' | 'business' | 'godmode' | 'billing' | 'marketing' | 'support' | 'ops' | 'notifications' | 'api-keys' | 'webhooks' | 'workspaces' | 'admin' | 'onboarding' | 'jobs' | 'analytics' | 'shared'
+export type View = 'landing' | 'dashboard' | 'builder' | 'settings' | 'business' | 'godmode' | 'billing' | 'marketing' | 'support' | 'ops' | 'notifications' | 'api-keys' | 'webhooks' | 'workspaces' | 'admin' | 'onboarding' | 'jobs' | 'analytics' | 'shared' | 'chat'
 export type AuthMode = 'login' | 'register'
+// How the project chat treats a message: let the AI decide (auto), only talk
+// (chat), or always build (build — the original behaviour).
+export type ChatMode = 'auto' | 'chat' | 'build'
+
+// Holds the in-flight project chat request so Stop can cancel it.
+let projectChatAbort: AbortController | null = null
 
 interface BuilderState {
   view: View
@@ -37,6 +44,9 @@ interface BuilderState {
   activeProviderKey: string | null
   generating: boolean
   generatingError: string | null
+  chatMode: ChatMode
+  // True while a conversational (not build) reply is streaming; Stop applies.
+  chatStreaming: boolean
   bootError: string | null
   booted: boolean
   sharedProject: { project: { name: string; slug: string; description: string; stack: string; styling: string }; files: { path: string; language: string; generated: boolean }[]; previewUrl: string } | null
@@ -88,6 +98,11 @@ interface BuilderState {
   setBuilderTab: (tab: 'code' | 'preview' | 'integrations') => void
   setActiveProvider: (key: string | null) => void
   generate: (message: string) => Promise<void>
+  // Project chat: answers, plans and explains, and hands real build requests to generate().
+  converse: (message: string) => Promise<void>
+  stopChat: () => void
+  setChatMode: (mode: ChatMode) => void
+  openChat: () => void
   saveFile: (path: string, content: string, language?: string) => Promise<void>
   deleteFile: (path: string) => Promise<void>
   refreshProviders: () => Promise<void>
@@ -128,6 +143,8 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   activeProviderKey: null,
   generating: false,
   generatingError: null,
+  chatMode: 'auto',
+  chatStreaming: false,
   bootError: null,
   booted: false,
   sharedProject: null,
@@ -182,6 +199,14 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       return
     }
     set({ view: 'dashboard', currentProject: null, files: [], generations: [] })
+  },
+
+  openChat() {
+    if (!get().session) {
+      get().openAuth('login')
+      return
+    }
+    set({ view: 'chat', currentProject: null, files: [], generations: [] })
   },
 
   openAuth(mode) {
@@ -536,6 +561,107 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     } finally {
       set({ generating: false })
     }
+  },
+
+  setChatMode(mode) {
+    set({ chatMode: mode })
+  },
+
+  stopChat() {
+    projectChatAbort?.abort()
+  },
+
+  async converse(message) {
+    const project = get().currentProject
+    if (!project) return
+
+    // Build mode is the original behaviour, untouched.
+    if (get().chatMode === 'build') {
+      await get().generate(message)
+      return
+    }
+
+    const stamp = Date.now()
+    const userMsgId = `local-${stamp}`
+    const assistantMsgId = `local-${stamp}-a`
+    const blank = {
+      fileOps: [],
+      providerId: null,
+      tokens: 0,
+      durationMs: 0,
+      createdAt: new Date().toISOString(),
+    }
+    set((s) => ({
+      generating: true,
+      chatStreaming: true,
+      generatingError: null,
+      generations: [
+        ...s.generations,
+        { id: userMsgId, role: 'user', content: message, ...blank },
+        { id: assistantMsgId, role: 'assistant', content: '', ...blank },
+      ],
+    }))
+
+    const patchAssistant = (fn: (g: GenerationView) => GenerationView) =>
+      set((s) => ({ generations: s.generations.map((g) => (g.id === assistantMsgId ? fn(g) : g)) }))
+
+    const controller = new AbortController()
+    projectChatAbort = controller
+    let handoff = false
+    let failure: string | null = null
+
+    try {
+      await streamChat(
+        `/api/projects/${project.id}/chat-stream`,
+        {
+          message,
+          providerKey: get().activeProviderKey,
+          mode: get().chatMode === 'chat' ? 'chat' : 'auto',
+        },
+        {
+          onThinking: (t) => patchAssistant((g) => ({ ...g, thinking: (g.thinking ?? '') + t })),
+          onThinkingEnd: (ms) => patchAssistant((g) => ({ ...g, thinkingMs: ms })),
+          onToken: (t) => patchAssistant((g) => ({ ...g, content: g.content + t })),
+          onBuild: () => {
+            handoff = true
+          },
+          onDone: (info) =>
+            patchAssistant((g) => ({
+              ...g,
+              providerId: info.provider?.id ?? null,
+              tokens: info.tokens,
+              durationMs: info.durationMs,
+            })),
+        },
+        controller.signal,
+      )
+    } catch (err) {
+      // Pressing Stop is not an error; keep whatever already streamed.
+      if (!controller.signal.aborted) failure = err instanceof Error ? err.message : 'chat_failed'
+    } finally {
+      if (projectChatAbort === controller) projectChatAbort = null
+    }
+
+    if (handoff) {
+      // The AI decided this is a build request. Drop the chat placeholders and
+      // run the existing, unchanged build pipeline (which records the turn).
+      set((s) => ({
+        chatStreaming: false,
+        generations: s.generations.filter((g) => g.id !== userMsgId && g.id !== assistantMsgId),
+      }))
+      await get().generate(message)
+      return
+    }
+
+    // Remove an empty assistant bubble left behind by an error or an early stop.
+    set((s) => ({
+      generating: false,
+      chatStreaming: false,
+      ...(failure ? { generatingError: failure } : {}),
+      generations: s.generations.filter(
+        (g) => !(g.id === assistantMsgId && !g.content.trim() && !g.thinking),
+      ),
+    }))
   },
 
   async saveFile(path, content, language) {

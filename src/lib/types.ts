@@ -76,6 +76,10 @@ export interface GenerationView {
   tokens: number
   durationMs: number
   createdAt: string
+  // Chat only (not stored on the server): the model's reasoning for this
+  // answer and how long it thought, in ms.
+  thinking?: string
+  thinkingMs?: number
 }
 
 export interface FileOp {

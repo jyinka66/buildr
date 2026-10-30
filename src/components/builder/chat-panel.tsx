@@ -19,11 +19,13 @@ import {
   FilePen,
   Send,
   Sparkles,
+  Square,
   Trash2,
   User,
   Zap,
 } from 'lucide-react'
-import { useBuilder } from '@/lib/store'
+import { useBuilder, type ChatMode } from '@/lib/store'
+import { ThinkingBlock } from '@/components/builder/thinking-block'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -34,10 +36,16 @@ import { cn } from '@/lib/utils'
 type ProviderWithKey = ProviderConfig & { hasKey: boolean }
 
 const EXAMPLE_PROMPTS = [
+  'Explain how this project is structured',
+  'What should I add next to make this app better?',
   'Add a login page with email + password',
   'Create a products list with search and filter',
-  'Generate a dashboard with charts and KPI cards',
-  'Add a settings page with theme switcher',
+]
+
+const CHAT_MODES: { value: ChatMode; label: string; hint: string }[] = [
+  { value: 'auto', label: 'Auto', hint: 'Buildr AI decides: it chats, or builds when you ask for changes' },
+  { value: 'chat', label: 'Chat', hint: 'Only talk: ask questions and plan. Nothing is changed in your app' },
+  { value: 'build', label: 'Build', hint: 'Always build: every message changes your app' },
 ]
 
 function FileOpBadge({ op }: { op: FileOp }) {
@@ -78,7 +86,17 @@ function MessageBubble({ msg, providers, streaming, streamingActive }: { msg: Ge
         </div>
       ) : null}
       <div className={cn('flex max-w-[85%] flex-col gap-1.5', isUser ? 'items-end' : 'items-start')}>
-        {streaming ? (
+        {isAssistant && msg.thinking ? (
+          <div className="w-full rounded-lg bg-muted/60 px-3 py-2">
+            <ThinkingBlock
+              text={msg.thinking}
+              active={!!streaming}
+              ms={msg.thinkingMs}
+            />
+          </div>
+        ) : null}
+
+        {streaming && !msg.thinking ? (
           // "thinking…" indicator while the first token hasn't arrived yet.
           <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-1">
@@ -88,7 +106,7 @@ function MessageBubble({ msg, providers, streaming, streamingActive }: { msg: Ge
               <span className="ml-1.5">thinking…</span>
             </span>
           </div>
-        ) : (
+        ) : streaming ? null : (
           <div
             className={cn(
               'rounded-lg px-3 py-2 text-sm leading-relaxed',
@@ -162,7 +180,11 @@ export function ChatPanel({ onSend }: ChatPanelProps) {
   const generating = useBuilder((s) => s.generating)
   const generatingError = useBuilder((s) => s.generatingError)
   const providers = useBuilder((s) => s.providers)
-  const generate = useBuilder((s) => s.generate)
+  const converse = useBuilder((s) => s.converse)
+  const chatMode = useBuilder((s) => s.chatMode)
+  const setChatMode = useBuilder((s) => s.setChatMode)
+  const chatStreaming = useBuilder((s) => s.chatStreaming)
+  const stopChat = useBuilder((s) => s.stopChat)
 
   const [input, setInput] = React.useState('')
   const scrollRef = React.useRef<HTMLDivElement>(null)
@@ -193,7 +215,7 @@ export function ChatPanel({ onSend }: ChatPanelProps) {
 
   const retry = () => {
     const lastUser = [...generations].reverse().find((g) => g.role === 'user')
-    if (lastUser) void generate(lastUser.content)
+    if (lastUser) void converse(lastUser.content)
   }
 
   return (
@@ -248,7 +270,7 @@ export function ChatPanel({ onSend }: ChatPanelProps) {
         <div className="border-t border-border px-3 pt-2">
           <Alert variant="destructive" className="py-2">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle className="text-xs">Generation failed</AlertTitle>
+            <AlertTitle className="text-xs">Something went wrong</AlertTitle>
             <AlertDescription className="flex items-center justify-between gap-2 text-xs">
               <span className="min-w-0 truncate">{generatingError}</span>
               <Button size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={retry}>
@@ -261,30 +283,68 @@ export function ChatPanel({ onSend }: ChatPanelProps) {
 
       {/* Composer */}
       <div className="sticky bottom-0 border-t border-border bg-background p-3">
+        <div className="mb-2 flex items-center gap-1" role="radiogroup" aria-label="Chat mode">
+          {CHAT_MODES.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              role="radio"
+              aria-checked={chatMode === m.value}
+              title={m.hint}
+              disabled={generating}
+              onClick={() => setChatMode(m.value)}
+              className={cn(
+                'rounded-full border px-2.5 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+                chatMode === m.value
+                  ? 'border-emerald-500/50 bg-emerald-500/10 text-foreground'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
         <div className="relative">
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Describe a feature or change…  (Enter to send · Shift+Enter for newline)"
+            placeholder={
+              chatMode === 'build'
+                ? 'Describe a feature or change…  (Enter to send · Shift+Enter for newline)'
+                : 'Ask anything, plan, or describe what to build…  (Enter to send)'
+            }
             disabled={generating}
             rows={2}
             className="min-h-[2.75rem] resize-none pr-12 text-sm leading-relaxed"
           />
-          <Button
-            type="button"
-            size="icon"
-            className="absolute right-1.5 bottom-1.5 h-7 w-7"
-            onClick={() => send(input)}
-            disabled={generating || !input.trim()}
-            aria-label="Send message"
-          >
-            {generating ? (
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-            ) : (
-              <Send className="h-3.5 w-3.5" />
-            )}
-          </Button>
+          {chatStreaming ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              className="absolute right-1.5 bottom-1.5 h-7 w-7"
+              onClick={stopChat}
+              aria-label="Stop generating"
+            >
+              <Square className="h-3 w-3 fill-current" />
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              size="icon"
+              className="absolute right-1.5 bottom-1.5 h-7 w-7"
+              onClick={() => send(input)}
+              disabled={generating || !input.trim()}
+              aria-label="Send message"
+            >
+              {generating ? (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -302,9 +362,9 @@ function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
         <Sparkles className="h-5 w-5" />
       </div>
       <div>
-        <p className="text-sm font-medium">Start building with a prompt</p>
+        <p className="text-sm font-medium">Chat with Buildr AI</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Describe what you want and Buildr will generate the code.
+          Ask questions, plan your app, or describe what to build and Buildr will generate the code.
         </p>
       </div>
       <div className="mt-1 flex flex-wrap justify-center gap-1.5">
