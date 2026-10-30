@@ -72,7 +72,8 @@ export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promi
     resolvePublicAddress(hostname),
     ...(signal ? [new Promise<never>((_resolve, reject) => {
       abortDns = () => reject(new Error('safe_fetch_aborted'))
-      signal.addEventListener('abort', abortDns, { once: true })
+      if (signal.aborted) abortDns()
+      else signal.addEventListener('abort', abortDns, { once: true })
     })] : []),
   ]).finally(() => {
     if (signal && abortDns) signal.removeEventListener('abort', abortDns)
