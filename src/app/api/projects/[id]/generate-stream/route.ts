@@ -12,7 +12,7 @@ import { extractFilesFromText, guessLanguage } from '@/lib/llm/code-generator'
 import { parseDbConfig, parseIntegrations } from '@/lib/helpers'
 import { requireSessionUser } from '@/lib/session'
 import { rateLimit } from '@/lib/rate-limit'
-import { checkLimit, trackUsage } from '@/lib/billing'
+import { checkLimit, releaseUsageReservation, trackUsage } from '@/lib/billing'
 import type { StackKey, StylingKey, FileOp } from '@/lib/types'
 
 export const runtime = 'nodejs'
@@ -69,12 +69,14 @@ export async function POST(
     .eq('id', id)
     .maybeSingle()
   if (pErr || !project) {
+    await releaseUsageReservation(user.id, limit.reservationId)
     return new Response(JSON.stringify({ error: 'not_found' }), {
       status: 404,
       headers: { 'content-type': 'application/json' },
     })
   }
   if (project.owner_id !== user.id) {
+    await releaseUsageReservation(user.id, limit.reservationId)
     return new Response(JSON.stringify({ error: 'forbidden' }), {
       status: 403,
       headers: { 'content-type': 'application/json' },
@@ -84,6 +86,7 @@ export async function POST(
   const body = (await req.json()) as { message: string; providerKey?: string | null }
   const message = (body.message || '').trim()
   if (!message) {
+    await releaseUsageReservation(user.id, limit.reservationId)
     return new Response(JSON.stringify({ error: 'message required' }), {
       status: 400,
       headers: { 'content-type': 'application/json' },
@@ -233,7 +236,14 @@ export async function POST(
 
         // Track token usage.
         if (totalTokens > 0) {
-          await trackUsage(user.id, 'llm_tokens', totalTokens, { projectId: id })
+          const usageRecorded = await trackUsage(user.id, 'llm_tokens', totalTokens, {
+            projectId: id,
+            reservationId: limit.reservationId,
+          })
+          if (!usageRecorded) {
+            await releaseUsageReservation(user.id, limit.reservationId)
+            throw new Error('usage_commit_failed')
+          }
         }
 
         const assistantMessage =
@@ -285,6 +295,8 @@ export async function POST(
         const msg = err instanceof Error ? err.message : 'stream_failed'
         send({ type: 'error', message: msg })
       } finally {
+        // Always clear a reservation left behind by a failed/aborted stream.
+        await releaseUsageReservation(user.id, limit.reservationId)
         controller.enqueue(encoder.encode('data: [DONE]\n\n'))
         controller.close()
       }
