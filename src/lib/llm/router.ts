@@ -48,7 +48,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'anthropic',
     name: 'Anthropic Claude',
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-sonnet-5',
     speciality: 'code',
     weight: 9,
     description:
@@ -57,7 +57,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'openai',
     name: 'OpenAI',
-    model: 'gpt-4o',
+    model: 'gpt-6.1-sol',
     speciality: 'schema',
     weight: 8,
     description: 'GPT-4o. Strong for schema generation and structured output.',
@@ -65,7 +65,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'google',
     name: 'Google Gemini',
-    model: 'gemini-1.5-pro',
+    model: 'gemini-3.8-flash',
     speciality: 'docs',
     weight: 7,
     description:
@@ -74,7 +74,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'deepseek',
     name: 'DeepSeek',
-    model: 'deepseek-coder',
+    model: 'deepseek-flash',
     speciality: 'code',
     weight: 6,
     description: 'DeepSeek Coder. Cost-effective code generation.',
@@ -120,16 +120,24 @@ export async function seedProviders(): Promise<void> {
   for (const entry of PROVIDER_CATALOG) {
     const { data: existing } = await db
       .from('llm_providers')
-      .select('id')
+      .select('id, model')
       .eq('key', entry.key)
       .maybeSingle()
 
     if (existing) {
+      const legacyDefaultModels: Partial<Record<ProviderKey, string>> = {
+        anthropic: 'claude-3-5-sonnet-20241022',
+        openai: 'gpt-4o',
+        google: 'gemini-1.5-pro',
+        deepseek: 'deepseek-coder',
+      }
+      const update: Record<string, string> = { name: entry.name }
+      // Upgrade only known retired catalogue defaults. Never overwrite a model
+      // explicitly chosen by an administrator.
+      if (legacyDefaultModels[entry.key] === existing.model) update.model = entry.model
       await db
         .from('llm_providers')
-        // Preserve administrator-selected model, task speciality, and endpoint.
-        // Catalogue values are defaults for new rows only.
-        .update({ name: entry.name })
+        .update(update)
         .eq('key', entry.key)
     } else {
       await db.from('llm_providers').insert({
@@ -279,7 +287,7 @@ async function runOpenAICompat(
     (provider.key === 'openai'
       ? 'https://api.openai.com/v1'
       : provider.key === 'deepseek'
-        ? 'https://api.deepseek.com/v1'
+        ? 'https://api.deepseek.com'
         : provider.key === 'google'
           ? 'https://generativelanguage.googleapis.com/v1beta/openai'
           : provider.key === 'anthropic'
@@ -465,7 +473,7 @@ async function* runOpenAICompatStream(
     (provider.key === 'openai'
       ? 'https://api.openai.com/v1'
       : provider.key === 'deepseek'
-        ? 'https://api.deepseek.com/v1'
+        ? 'https://api.deepseek.com'
         : provider.key === 'google'
           ? 'https://generativelanguage.googleapis.com/v1beta/openai'
           : provider.key === 'anthropic'
