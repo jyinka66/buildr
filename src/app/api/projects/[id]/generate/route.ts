@@ -9,7 +9,7 @@ import {
   type ProjectDbRow,
 } from '@/lib/helpers'
 import { requireSessionUser } from '@/lib/session'
-import { checkLimit, trackUsage } from '@/lib/billing'
+import { checkLimit, releaseUsageReservation, trackUsage } from '@/lib/billing'
 import { distributedRateLimit } from '@/lib/rate-limit'
 import type { StackKey, StylingKey } from '@/lib/types'
 
@@ -112,6 +112,20 @@ export async function POST(
       { status: 402 },
     )
   }
+  const availableTokens = limit.limit === -1 ? 8000 : limit.limit - limit.used
+  const estimatedInputTokens = Math.ceil((
+    message.length +
+    history.reduce((sum, item) => sum + item.content.length, 0) +
+    existingFileList.reduce((sum, item) => sum + item.path.length + 20, 0)
+  ) / 3) + 2000
+  if (availableTokens <= estimatedInputTokens) {
+    await releaseUsageReservation(user.id, limit.reservationId)
+    return NextResponse.json(
+      { error: 'plan_limit_exceeded', message: 'Not enough monthly AI token capacity remains for this generation.' },
+      { status: 402 },
+    )
+  }
+  const generationMaxTokens = Math.max(1, Math.min(8000, availableTokens - estimatedInputTokens))
 
   try {
     const result = await generateIncremental({
@@ -124,11 +138,23 @@ export async function POST(
       history,
       existingFiles: existingFileList,
       overrideProvider: (body.providerKey as never) ?? null,
+      maxTokens: generationMaxTokens,
     })
 
-    // Track token usage after a successful generation.
+    // Commit actual usage against the reservation; do not allow concurrent
+    // generations to overrun the monthly token cap.
     if (result.tokens > 0) {
-      await trackUsage(user.id, 'llm_tokens', result.tokens, { projectId: id })
+      const usageRecorded = await trackUsage(user.id, 'llm_tokens', result.tokens, {
+        projectId: id, reservationId: limit.reservationId,
+      })
+      if (!usageRecorded) {
+        return NextResponse.json({
+          error: 'usage_commit_failed',
+          message: 'Generation completed, but token usage could not be committed safely.',
+        }, { status: 503 })
+      }
+    } else {
+      await releaseUsageReservation(user.id, limit.reservationId)
     }
 
     const { data: updatedFiles } = await db
