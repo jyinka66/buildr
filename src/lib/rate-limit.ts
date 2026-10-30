@@ -56,7 +56,10 @@ export function rateLimit(key: string, opts: RateLimitOptions): RateLimitResult 
     b.tokens -= 1
     return { ok: true, remaining: Math.floor(b.tokens), resetMs: opts.windowMs }
   }
-  return { ok: false, remaining: 0, resetMs: Math.ceil(opts.windowMs - elapsed) }
+  // In a token bucket, one request becomes available after enough time
+  // to refill one token (not after an entire fixed window).
+  const resetMs = Math.ceil(((1 - b.tokens) / opts.limit) * opts.windowMs)
+  return { ok: false, remaining: 0, resetMs }
 }
 
 /** Build a rate-limit response with standard headers. */
