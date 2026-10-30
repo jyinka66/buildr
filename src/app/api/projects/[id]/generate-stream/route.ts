@@ -195,7 +195,6 @@ export async function POST(
             durationMs = event.durationMs
           } else if (event.type === 'error') {
             streamFailure = event.message
-            send({ type: 'error', message: event.message })
           }
         }
 
