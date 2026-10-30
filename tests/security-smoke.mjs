@@ -35,6 +35,53 @@ test('payment initialization and verification fail closed without Paystack crede
   }
 })
 
+
+test('Paystack mode requires an explicit matching test or live secret-key prefix', async () => {
+  const previous = {
+    key: process.env.PAYSTACK_SECRET_KEY,
+    mode: process.env.PAYSTACK_MODE,
+    nodeEnv: process.env.NODE_ENV,
+  }
+  const restore = (name, value) => value === undefined ? delete process.env[name] : process.env[name] = value
+  try {
+    process.env.NODE_ENV = 'production'
+    process.env.PAYSTACK_MODE = 'test'
+    process.env.PAYSTACK_SECRET_KEY = 'sk_live_not-a-real-key'
+    await assert.rejects(
+      initializePayment({ email: 'client@example.com', amountKobo: 10000, reference: 'mode-test-ref' }),
+      /PAYSTACK_TEST_KEY_REQUIRED/,
+    )
+    process.env.PAYSTACK_MODE = 'live'
+    process.env.PAYSTACK_SECRET_KEY = 'sk_test_not-a-real-key'
+    await assert.rejects(
+      initializePayment({ email: 'client@example.com', amountKobo: 10000, reference: 'mode-live-ref' }),
+      /PAYSTACK_LIVE_KEY_REQUIRED/,
+    )
+    process.env.PAYSTACK_MODE = 'sandbox'
+    process.env.PAYSTACK_SECRET_KEY = 'sk_test_not-a-real-key'
+    await assert.rejects(
+      initializePayment({ email: 'client@example.com', amountKobo: 10000, reference: 'mode-invalid-ref' }),
+      /PAYSTACK_MODE_INVALID/,
+    )
+  } finally {
+    restore('PAYSTACK_SECRET_KEY', previous.key)
+    restore('PAYSTACK_MODE', previous.mode)
+    restore('NODE_ENV', previous.nodeEnv)
+  }
+})
+
+test('registration and credentials login retain password and account-state safeguards', () => {
+  const register = readFileSync(new URL('../src/app/api/auth/register/route.ts', import.meta.url), 'utf8')
+  const auth = readFileSync(new URL('../src/lib/auth.ts', import.meta.url), 'utf8')
+  assert.ok(register.includes('bcrypt.hash(password, 10)'), 'registration must hash passwords')
+  assert.ok(register.includes('Buffer.byteLength(password, \'utf8\') > 72'), 'registration must cap bcrypt password bytes')
+  assert.ok(register.includes('rateLimit('), 'registration must be rate limited')
+  assert.ok(register.includes('.select(\'id, email, name\')'), 'registration response must not return password or private user fields')
+  assert.ok(auth.includes('bcrypt.compare(password, user.password)'), 'login must verify the password hash')
+  assert.ok(auth.includes('if (user.is_disabled) return null'), 'disabled accounts must not authenticate')
+  assert.ok(auth.includes('if (user.totp_enabled)'), 'login must preserve optional two-factor verification')
+})
+
 test('payment references are unique and contain no unsafe job ID characters', () => {
   const first = generateReference('job/123')
   const second = generateReference('job/123')
