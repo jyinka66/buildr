@@ -9,6 +9,7 @@
     "sandbox": "bun run sandbox-runner.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.118.0"
+    "@supabase/supabase-js": "^2.118.0",
+    "typescript": "^5.9.3"
   }
 }

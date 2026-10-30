@@ -1,12 +1,25 @@
 /** Executes one generated route inside a disposable, network-isolated container. */
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 
 const input = JSON.parse(readFileSync(0, 'utf8')) as {
   routePath: string; files: Record<string, string>; method: string; url: string;
   body: string | null; headers: [string, string][]
 }
 const files = new Map(Object.entries(input.files || {}))
-const transpiler = new Bun.Transpiler({ loader: 'ts', target: 'bun', tsconfig: { compilerOptions: { jsx: 'react-jsx', strict: false, module: 'commonjs', moduleResolution: 'bundler' } } })
+const compilerOptions: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.CommonJS,
+  jsx: ts.JsxEmit.ReactJSX,
+  esModuleInterop: false,
+  allowJs: true,
+  strict: false,
+  skipLibCheck: true,
+}
+
+function transpile(source: string): string {
+  return ts.transpileModule(source, { compilerOptions }).outputText
+}
 
 function buildRequire(routePath: string) {
   const mocks: Record<string, any> = {
@@ -41,7 +54,7 @@ function buildRequire(routePath: string) {
     if (path) {
       if (cache.has(path)) return cache.get(path)
       const mod = { exports: {} as any }; cache.set(path, mod.exports)
-      const js = transpiler.transformSync(files.get(path)!)
+      const js = transpile(files.get(path)!)
       new Function('module', 'exports', 'require', js)(mod, mod.exports, (s: string) => localRequire(s, path))
       cache.set(path, mod.exports); return mod.exports
     }
@@ -53,7 +66,7 @@ function buildRequire(routePath: string) {
 
 try {
   if (!input.routePath || !files.has(input.routePath)) throw new Error('route_not_found')
-  const js = transpiler.transformSync(files.get(input.routePath)!)
+  const js = transpile(files.get(input.routePath)!)
   const mod = { exports: {} as Record<string, any> }
   new Function('module', 'exports', 'require', js)(mod, mod.exports, buildRequire(input.routePath))
   const handler = mod.exports[input.method.toUpperCase()]
