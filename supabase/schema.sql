@@ -39,6 +39,7 @@ create table if not exists public.projects (
   db_config     jsonb not null default '{}',
   status        text not null default 'draft',
   preview_url   text,
+  is_public_preview boolean not null default false,
   deployment_url text,
   owner_id      text not null references public.users(id) on delete cascade,
   workspace_id  text,
@@ -765,7 +766,7 @@ CREATE POLICY projects_public_preview_metadata
   ON public.projects
   FOR SELECT
   TO anon
-  USING (preview_url IS NOT NULL);
+  USING (is_public_preview = true AND preview_url IS NOT NULL);
 
 DROP POLICY IF EXISTS project_files_public_preview_read ON public.project_files;
 CREATE POLICY project_files_public_preview_read
@@ -777,6 +778,7 @@ CREATE POLICY project_files_public_preview_read
       SELECT 1
       FROM public.projects AS p
       WHERE p.id = project_files.project_id
+        AND p.is_public_preview = true
         AND p.preview_url IS NOT NULL
     )
   );
