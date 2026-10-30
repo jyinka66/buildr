@@ -50,6 +50,7 @@ export async function GET() {
           status: r.status,
           previewUrl: r.preview_url,
           deploymentUrl: r.deployment_url,
+          isPublic: r.is_public === true,
           fileCount: count ?? 0,
           createdAt: r.created_at,
           updatedAt: r.updated_at,
