@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { isProviderReady, rankProviders } from '../src/lib/llm/routing-policy.ts'
 
 const provider = (key, overrides = {}) => ({
@@ -34,7 +35,7 @@ test('router prefers explicit valid override, then task speciality, general, and
     'zai', 'anthropic', 'deepseek', 'openai', 'google',
   ])
   assert.deepEqual(rankProviders(providers, 'docs').map((p) => p.key), [
-    'google', 'deepseek', 'zai', 'anthropic', 'openai',
+    'google', 'zai', 'deepseek', 'anthropic', 'openai',
   ])
   assert.equal(rankProviders(providers, 'code', 'anthropic')[0].key, 'anthropic')
   assert.equal(rankProviders(providers, 'code', 'ollama')[0].key, 'zai')
@@ -45,4 +46,9 @@ test('router returns no candidates when every provider is unavailable', () => {
     provider('openai', { apiKey: '' }),
     provider('zai', { enabled: false }),
   ], 'code'), [])
+})
+
+test('streaming generation never applies partial files after a provider error', () => {
+  const route = readFileSync(new URL('../src/app/api/projects/[id]/generate-stream/route.ts', import.meta.url), 'utf8')
+  assert.ok(route.includes('if (streamFailure) throw new Error(streamFailure)'), 'stream failures must abort before file parsing and persistence')
 })
