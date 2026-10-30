@@ -4,7 +4,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
-import { distributedRateLimit, trustedClientIp } from '@/lib/rate-limit'
+import { distributedRateLimit } from '@/lib/distributed-rate-limit'
+import { trustedClientIp } from '@/lib/rate-limit'
 
 interface RegisterBody {
   email?: string
