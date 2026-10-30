@@ -6,7 +6,7 @@ import { randomBytes } from 'crypto'
 import { db } from '@/lib/db'
 import { syncAdminFlag, isUserAdmin } from '@/lib/admin'
 import { verifyCode, hashBackupCode } from '@/lib/totp'
-import { distributedRateLimit } from '@/lib/rate-limit'
+import { distributedRateLimit } from '@/lib/distributed-rate-limit'
 
 // SECURITY: In production, NEXTAUTH_SECRET MUST be set. The hardcoded
 // fallback is for local dev only — if it leaks, anyone can mint valid
