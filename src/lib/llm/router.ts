@@ -126,12 +126,9 @@ export async function seedProviders(): Promise<void> {
     if (existing) {
       await db
         .from('llm_providers')
-        .update({
-          name: entry.name,
-          model: entry.model,
-          speciality: entry.speciality,
-          base_url: entry.baseUrl ?? null,
-        })
+        // Preserve administrator-selected model, task speciality, and endpoint.
+        // Catalogue values are defaults for new rows only.
+        .update({ name: entry.name })
         .eq('key', entry.key)
     } else {
       await db.from('llm_providers').insert({
@@ -193,33 +190,11 @@ export async function selectProvider(
   overrideKey?: ProviderKey | null,
 ): Promise<ProviderConfig> {
   const providers = await loadProviders()
-  const eligible = providers.filter(
-    (p) => p.enabled && p.health !== 'down',
-  )
-
-  if (overrideKey) {
-    const exact = eligible.find((p) => p.key === overrideKey)
-    if (exact) return exact
+  const ranked = rankProviders(providers, task, overrideKey)
+  if (!ranked.length) {
+    throw new Error('No configured LLM providers available. Configure a provider API key or enable the built-in Z.ai provider.')
   }
-
-  // Prefer speciality match, then general, then zai fallback.
-  const bySpeciality = eligible
-    .filter((p) => p.speciality === task)
-    .sort((a, b) => b.weight - a.weight)
-  if (bySpeciality.length) return bySpeciality[0]
-
-  const general = eligible
-    .filter((p) => p.speciality === 'general' || p.key === 'zai')
-    .sort((a, b) => b.weight - a.weight)
-  if (general.length) return general[0]
-
-  // Last resort: any eligible provider, prefer zai.
-  const fallback =
-    eligible.find((p) => p.key === 'zai') ?? eligible[0]
-  if (!fallback) {
-    throw new Error('No LLM providers available. Enable at least one provider.')
-  }
-  return fallback
+  return ranked[0]
 }
 
 // ---------------------------------------------------------------------------
@@ -384,14 +359,9 @@ export async function complete(
   overrideKey?: ProviderKey | null,
 ): Promise<CompletionResult> {
   const providers = await loadProviders()
-  const eligible = providers.filter((p) => p.enabled && p.health !== 'down')
-
-  // Build ordered candidate list for failover.
-  const candidates: ProviderConfig[] = []
-  const first = await selectProvider(task, overrideKey)
-  candidates.push(first)
-  for (const p of eligible) {
-    if (!candidates.find((c) => c.id === p.id)) candidates.push(p)
+  const candidates = rankProviders(providers, task, overrideKey)
+  if (!candidates.length) {
+    throw new Error('No configured LLM providers available. Configure a provider API key or enable the built-in Z.ai provider.')
   }
 
   const failover = options.failover !== false
@@ -401,6 +371,7 @@ export async function complete(
     const start = Date.now()
     try {
       const content = await runWithProvider(messages, options, provider)
+      if (!content.trim()) throw new Error(`${provider.name} returned an empty completion.`)
       const tokens = Math.ceil(
         messages.reduce((n, m) => n + m.content.length, 0) / 4 +
           content.length / 4,
@@ -422,7 +393,7 @@ export async function complete(
   const message =
     lastErr instanceof Error
       ? lastErr.message
-      : 'All LLM providers failed for this request.'
+      : 'All configured LLM providers failed for this request.'
   throw new Error(message)
 }
 
@@ -548,35 +519,53 @@ export async function* completeStream(
   options: CompletionOptions = {},
   overrideKey?: ProviderKey | null,
 ): AsyncGenerator<StreamEvent> {
-  const provider = await selectProvider(task, overrideKey)
-  const start = Date.now()
-  let fullContent = ''
+  const candidates = rankProviders(await loadProviders(), task, overrideKey)
+  if (!candidates.length) {
+    yield { type: 'error', message: 'No configured LLM providers available. Configure a provider API key or enable the built-in Z.ai provider.' }
+    return
+  }
 
-  try {
-    if (provider.key === 'zai') {
-      for await (const token of runZaiStream(messages)) {
+  let lastErr: unknown = null
+  const failover = options.failover !== false
+
+  for (const provider of candidates) {
+    const start = Date.now()
+    let fullContent = ''
+    try {
+      const tokenStream = provider.key === 'zai'
+        ? runZaiStream(messages)
+        : runOpenAICompatStream(messages, options, provider)
+
+      for await (const token of tokenStream) {
         fullContent += token
         yield { type: 'token', content: token }
       }
-    } else if (!provider.apiKey || provider.apiKey.trim() === '') {
-      throw new Error(`Provider "${provider.name}" has no API key configured.`)
-    } else {
-      for await (const token of runOpenAICompatStream(messages, options, provider)) {
-        fullContent += token
-        yield { type: 'token', content: token }
+      if (!fullContent.trim()) throw new Error(`${provider.name} returned an empty stream.`)
+
+      await markProviderHealth(provider.id, 'healthy')
+      const tokens = Math.ceil(
+        messages.reduce((n, m) => n + m.content.length, 0) / 4 + fullContent.length / 4,
+      )
+      yield { type: 'done', provider, tokens, durationMs: Date.now() - start, fullContent }
+      return
+    } catch (err) {
+      lastErr = err
+      await markProviderHealth(provider.id, 'degraded')
+      // Retrying after output has reached the client would duplicate or corrupt
+      // generated files. Fail over only when the provider failed before its
+      // first token; otherwise report the partial-stream failure clearly.
+      if (fullContent.length > 0 || !failover) {
+        yield {
+          type: 'error',
+          message: err instanceof Error ? err.message : 'stream_failed',
+        }
+        return
       }
     }
+  }
 
-    await markProviderHealth(provider.id, 'healthy')
-    const tokens = Math.ceil(
-      messages.reduce((n, m) => n + m.content.length, 0) / 4 + fullContent.length / 4,
-    )
-    yield { type: 'done', provider, tokens, durationMs: Date.now() - start, fullContent }
-  } catch (err) {
-    await markProviderHealth(provider.id, 'degraded')
-    yield {
-      type: 'error',
-      message: err instanceof Error ? err.message : 'stream_failed',
-    }
+  yield {
+    type: 'error',
+    message: lastErr instanceof Error ? lastErr.message : 'All configured LLM providers failed for this stream.',
   }
 }
