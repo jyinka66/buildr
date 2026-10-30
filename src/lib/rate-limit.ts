@@ -75,3 +75,9 @@ export function rateLimitedResponse(resetMs: number): Response {
     },
   )
 }
+
+export function trustedClientIp(headers: Headers): string {
+  if (process.env.TRUST_PROXY_HEADERS !== 'true') return process.env.NODE_ENV === 'production' ? 'unknown' : 'development'
+  const ip = headers.get('x-forwarded-for')?.split(',')[0]?.trim() || headers.get('x-real-ip')?.trim()
+  return ip && /^[0-9a-fA-F:.]+$/.test(ip) ? ip : 'unknown'
+}
