@@ -289,7 +289,7 @@ export interface CompletionResult {
 
 // Default timeout for all LLM HTTP calls (30s). Prevents a slow provider
 // from hanging the generation indefinitely.
-const LLM_TIMEOUT_MS = 30_000
+const LLM_TIMEOUT_MS = 120_000
 
 async function runOpenAICompat(
   messages: ChatMessage[],
