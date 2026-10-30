@@ -6,11 +6,8 @@
 // best healthy provider for a given task; if that provider fails it
 // falls over to the next-best.
 //
-// The built-in `zai` provider is the only one actually wired to a real
-// backend (z-ai-web-dev-sdk). Other providers (openai, anthropic, google,
-// deepseek, ollama) are modelled in the registry and configurable in the
-// UI; their HTTP integration is implemented in `providerRunner` so that
-// when a user supplies an API key, routing to that provider works for real.
+// Providers use server-side API keys and HTTP APIs. Legacy Z.ai rows are
+// deliberately excluded so the old built-in provider cannot intercept chat.
 
 import { db } from '@/lib/db'
 import type {
@@ -36,13 +33,22 @@ interface ProviderCatalogEntry {
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
-    key: 'zai',
-    name: 'Z.ai (Built-in)',
-    model: 'glm-4.6',
+    key: 'groq',
+    name: 'Groq',
+    model: 'llama-3.3-70b-versatile',
     speciality: 'code',
     weight: 10,
-    description:
-      'Z.ai GLM API using a server-side API key configured by the Buildr operator.',
+    description: 'OpenAI-compatible Groq inference API. Add your own API key.',
+    baseUrl: 'https://api.groq.com/openai/v1',
+  },
+  {
+    key: 'openrouter',
+    name: 'OpenRouter',
+    model: 'openrouter/free',
+    speciality: 'code',
+    weight: 9,
+    description: 'OpenAI-compatible multi-provider API. Add your own API key.',
+    baseUrl: 'https://openrouter.ai/api/v1',
   },
   {
     key: 'anthropic',
@@ -172,18 +178,15 @@ export async function loadProviders(): Promise<ProviderConfig[]> {
     .order('name', { ascending: true })
 
   if (error || !rows) return []
-  return (rows as LlmProviderRow[]).map((r) => ({
+  // Ignore legacy Z.ai rows, including the old managed-key configuration.
+  return (rows as LlmProviderRow[]).filter((r) => r.key !== 'zai').map((r) => ({
     id: r.id,
     key: r.key as ProviderKey,
     name: r.name,
-    model: r.key === 'zai' ? (process.env.ZAI_MODEL || process.env.BUILDR_LLM_MODEL || r.model || 'glm-4.6') : r.model,
-    apiKey: r.key === 'zai'
-      ? (process.env.ZAI_API_KEY || process.env.BUILDR_LLM_API_KEY || (r.api_key === '(managed)' ? '' : r.api_key))
-      : r.api_key,
-    baseUrl: r.key === 'zai'
-      ? (process.env.ZAI_BASE_URL || process.env.BUILDR_LLM_BASE_URL || r.base_url || 'https://api.z.ai/api/paas/v4')
-      : r.base_url,
-    enabled: r.enabled || (r.key === 'zai' && Boolean(process.env.ZAI_API_KEY || process.env.BUILDR_LLM_API_KEY)),
+    model: r.model,
+    apiKey: r.api_key,
+    baseUrl: r.base_url,
+    enabled: r.enabled,
     weight: r.weight,
     speciality: r.speciality as TaskKind,
     health: r.health as 'healthy' | 'degraded' | 'down',
@@ -204,7 +207,7 @@ export async function selectProvider(
   const providers = await loadProviders()
   const ranked = rankProviders(providers, task, overrideKey)
   if (!ranked.length) {
-    throw new Error('No AI provider is configured. Add ZAI_API_KEY to the Buildr server environment (recommended), or configure an API key in Settings → LLM Providers.')
+    throw new Error('No AI provider is configured. Add a provider API key in Settings → LLM Providers.')
   }
   return ranked[0]
 }
@@ -247,7 +250,7 @@ export interface CompletionResult {
 }
 
 // ---------------------------------------------------------------------------
-// Generic OpenAI-compatible runner for openai / deepseek / ollama / google
+// Generic OpenAI-compatible runner for Groq, OpenRouter, OpenAI, DeepSeek, Ollama and Gemini
 // (Gemini's OpenAI-compat endpoint). Anthropic uses a different schema but we
 // route it through its native messages API. This keeps the architecture
 // honest: real HTTP routing works when keys are supplied.
@@ -264,9 +267,11 @@ async function runOpenAICompat(
 ): Promise<string> {
   const base =
     provider.baseUrl ||
-    (provider.key === 'zai'
-      ? 'https://api.z.ai/api/paas/v4'
-      : provider.key === 'openai'
+    (provider.key === 'groq'
+      ? 'https://api.groq.com/openai/v1'
+      : provider.key === 'openrouter'
+        ? 'https://openrouter.ai/api/v1'
+        : provider.key === 'openai'
       ? 'https://api.openai.com/v1'
       : provider.key === 'deepseek'
         ? 'https://api.deepseek.com'
@@ -353,7 +358,7 @@ export async function complete(
   const providers = await loadProviders()
   const candidates = rankProviders(providers, task, overrideKey)
   if (!candidates.length) {
-    throw new Error('No configured LLM providers available. Configure a provider API key or enable the built-in Z.ai provider.')
+    throw new Error('No configured LLM providers available. Configure and enable a provider API key in Settings → LLM Providers.')
   }
 
   const failover = options.failover !== false
@@ -408,7 +413,11 @@ async function* runOpenAICompatStream(
 ): AsyncGenerator<string> {
   const base =
     provider.baseUrl ||
-    (provider.key === 'openai'
+    (provider.key === 'groq'
+      ? 'https://api.groq.com/openai/v1'
+      : provider.key === 'openrouter'
+        ? 'https://openrouter.ai/api/v1'
+        : provider.key === 'openai'
       ? 'https://api.openai.com/v1'
       : provider.key === 'deepseek'
         ? 'https://api.deepseek.com'
