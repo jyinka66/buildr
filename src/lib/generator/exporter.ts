@@ -368,8 +368,8 @@ function hardenPreviewHtml(html: string): string {
     "worker-src 'none'",
   ].join('; ')
   const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`
-  if (/<head(?:\\s[^>]*)?>/i.test(html)) {
-    return html.replace(/<head(?:\\s[^>]*)?>/i, (head) => head + meta)
+  if (/<head(?:\s[^>]*)?>/i.test(html)) {
+    return html.replace(/<head(?:\s[^>]*)?>/i, (head) => head + meta)
   }
   return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`
 }
