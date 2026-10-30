@@ -177,6 +177,7 @@ export async function POST(
         let providerInfo: { id: string; name: string; model: string } | null = null
         let totalTokens = 0
         let durationMs = 0
+        let streamFailure: string | null = null
 
         // Stream tokens from the LLM.
         for await (const event of completeStream(
@@ -193,11 +194,15 @@ export async function POST(
             totalTokens = event.tokens
             durationMs = event.durationMs
           } else if (event.type === 'error') {
+            streamFailure = event.message
             send({ type: 'error', message: event.message })
           }
         }
 
-        send({ type: 'status', message: 'Applying file changes…' })
+        // Never parse or persist partial JSON after an upstream stream failure.
+        if (streamFailure) throw new Error(streamFailure)
+
+        send({ type: 'status', message: 'Applying file changes…' )
 
         // Parse files from the LLM response.
         const llmFiles = extractFilesFromText(fullContent)
