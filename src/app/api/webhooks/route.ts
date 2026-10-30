@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireSessionUser } from '@/lib/session'
 import { generateWebhookSecret } from '@/lib/webhook'
+import { isUrlSafe } from '@/lib/ssrf'
 
 // The full catalogue of event types a webhook can subscribe to.
 // "*" is a wildcard that matches all events (set at the API layer).
@@ -125,11 +126,21 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => ({}))) as CreateBody
   const url = body.url?.trim() || ''
-  if (!/^https?:\/\//i.test(url)) {
-    return NextResponse.json(
-      { error: 'Please provide a valid HTTP(S) URL.' },
-      { status: 400 },
-    )
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(url)
+  } catch {
+    return NextResponse.json({ error: 'Please provide a valid HTTP(S) URL.' }, { status: 400 })
+  }
+  if (!['http:', 'https:'].includes(parsedUrl.protocol) || url.length > 2048) {
+    return NextResponse.json({ error: 'Please provide a valid HTTP(S) URL.' }, { status: 400 })
+  }
+  if (process.env.NODE_ENV === 'production' && parsedUrl.protocol !== 'https:') {
+    return NextResponse.json({ error: 'Webhook URLs must use HTTPS in production.' }, { status: 400 })
+  }
+  const safety = await isUrlSafe(parsedUrl.toString())
+  if (!safety.ok) {
+    return NextResponse.json({ error: 'Webhook URL must resolve only to public IP addresses.' }, { status: 400 })
   }
 
   const requestedEvents = Array.isArray(body.events) ? body.events : []
