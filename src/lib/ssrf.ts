@@ -1,6 +1,5 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
-import { Agent } from 'undici'
 
 export interface SsrfCheckResult {
   ok: boolean
@@ -134,8 +133,6 @@ export async function safeFetch(
     for (let redirectCount = 0; ; redirectCount++) {
       const check = await isUrlSafe(current.toString())
       if (!check.ok) throw new Error(`SSRF blocked: ${check.reason}`)
-      // Fetch still resolves hostnames independently, so this check alone cannot
-      // close DNS rebinding. Keep this guard until the pinned transport is installed.
       const response = await fetch(current, { ...init, method, body, headers, redirect: 'manual', signal: controller.signal })
       if (![301, 302, 303, 307, 308].includes(response.status)) return response
 
