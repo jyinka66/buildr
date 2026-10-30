@@ -59,9 +59,11 @@ export const authOptions: NextAuthOptions = {
         const loginAttempt = await distributedRateLimit(`login:${email}`, { limit: 10, windowMs: 15 * 60 * 1000 })
         if (!loginAttempt.ok) return null
 
-        const { data: user, error } = await db.from('users').select('id, email, name, password, is_disabled, totp_secret, totp_enabled, totp_backup_codes').eq('email', email).single()
+        const { data: user, error } = await db.from('users').select('id, email, name, password, email_verified, is_disabled, totp_secret, totp_enabled, totp_backup_codes').eq('email', email).single()
         if (error || !user || !user.password) return null
         if (user.is_disabled) return null
+        // Critical: unverified email accounts must never receive a session.
+        if (user.email_verified !== true) return null
 
         const ok = await bcrypt.compare(password, user.password)
         if (!ok) return null
