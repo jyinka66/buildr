@@ -54,11 +54,14 @@ export async function checkLimit(userId: string, metric: UsageMetric): Promise<{
 
 export async function trackUsage(userId: string, metric: UsageMetric, quantity: number = 1, metadata?: { projectId?: string; [k: string]: unknown }): Promise<void> {
   try {
-    await db.from('usage_events').insert({
+    const { error } = await db.from('usage_events').insert({
       owner_id: userId, metric, quantity,
       project_id: metadata?.projectId || null,
       metadata: JSON.stringify(metadata || {}),
     })
+    if (error) {
+      console.error('[Buildr] trackUsage insert failed:', error.message)
+    }
   } catch (err) {
     console.error('[Buildr] trackUsage failed:', err instanceof Error ? err.message : err)
   }
