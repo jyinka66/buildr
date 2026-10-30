@@ -95,6 +95,7 @@ interface PatchBody {
   integrations?: string[]
   dbConfig?: DbConfig
   providerKey?: string | null
+  isPublicPreview?: boolean
 }
 
 export async function PATCH(
