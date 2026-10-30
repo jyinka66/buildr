@@ -44,8 +44,8 @@ export const authOptions: NextAuthOptions = {
         // Apply an IP bucket only when the deployment explicitly trusts its
         // reverse proxy headers. Never let a caller spoof their own IP bucket.
         const requestHeaders = new Headers()
-        const forwardedFor = req.headers['x-forwarded-for']
-        const realIp = req.headers['x-real-ip']
+        const forwardedFor = req.headers?.['x-forwarded-for']
+        const realIp = req.headers?.['x-real-ip']
         if (typeof forwardedFor === 'string') requestHeaders.set('x-forwarded-for', forwardedFor)
         if (typeof realIp === 'string') requestHeaders.set('x-real-ip', realIp)
         const clientIp = trustedClientIp(requestHeaders)
