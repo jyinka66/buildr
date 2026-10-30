@@ -52,3 +52,17 @@ test('streaming generation never applies partial files after a provider error', 
   const route = readFileSync(new URL('../src/app/api/projects/[id]/generate-stream/route.ts', import.meta.url), 'utf8')
   assert.ok(route.includes('if (streamFailure) throw new Error(streamFailure)'), 'stream failures must abort before file parsing and persistence')
 })
+
+test('normal and streaming completions share readiness-aware routing and native Anthropic streaming', () => {
+  const router = readFileSync(new URL('../src/lib/llm/router.ts', import.meta.url), 'utf8')
+  assert.ok(router.includes('rankProviders(providers, task, overrideKey)'), 'normal completion must use the shared candidate order')
+  assert.ok(router.includes('rankProviders(await loadProviders(), task, overrideKey)'), 'streaming completion must use the same candidate order')
+  assert.ok(router.includes("json.type === 'content_block_delta'"), 'Anthropic streaming must parse its native SSE events')
+  assert.ok(router.includes("if (provider.key === 'anthropic')"), 'Anthropic must use its native messages API')
+})
+
+test('provider settings API requires authentication before returning configuration', () => {
+  const route = readFileSync(new URL('../src/app/api/providers/route.ts', import.meta.url), 'utf8')
+  assert.ok(route.includes('await requireSessionUser()'), 'provider metadata must not be public')
+  assert.ok(route.includes('await requireAdmin()'), 'provider mutations must remain admin-only')
+})
