@@ -85,13 +85,13 @@ export async function safeFetch(
   let timer: ReturnType<typeof setTimeout> | undefined
   let cleanedUp = false
   let timeoutTransferredToBody = false
+  const abortFromCaller = () => controller.abort(externalSignal?.reason)
   const cleanup = () => {
     if (cleanedUp) return
     cleanedUp = true
     if (timer) clearTimeout(timer)
     externalSignal?.removeEventListener('abort', abortFromCaller)
   }
-  const abortFromCaller = () => controller.abort(externalSignal?.reason)
   if (externalSignal) {
     if (externalSignal.aborted) abortFromCaller()
     else externalSignal.addEventListener('abort', abortFromCaller, { once: true })
