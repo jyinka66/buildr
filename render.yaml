@@ -60,8 +60,8 @@ services:
     region: oregon
     branch: main
     rootDir: mini-services/api-runtime
-    dockerfilePath: mini-services/api-runtime/Dockerfile
-    dockerContext: mini-services/api-runtime
+    dockerfilePath: Dockerfile
+    dockerContext: .
     healthCheckPath: /__health
     autoDeploy: true
     envVars:
@@ -89,10 +89,9 @@ services:
     region: oregon
     branch: main
     rootDir: mini-services/api-runtime
-    dockerfilePath: mini-services/api-runtime/Dockerfile
-    dockerContext: mini-services/api-runtime
+    dockerfilePath: Dockerfile
+    dockerContext: .
     dockerCommand: bun run sandbox-runner.ts
-    healthCheckPath: /__health
     autoDeploy: true
     envVars:
       - key: NODE_ENV
@@ -125,8 +124,8 @@ services:
     region: oregon
     branch: main
     rootDir: mini-services/collab-service
-    dockerfilePath: mini-services/collab-service/Dockerfile
-    dockerContext: mini-services/collab-service
+    dockerfilePath: Dockerfile
+    dockerContext: .
     autoDeploy: true
     envVars:
       - key: NODE_ENV
