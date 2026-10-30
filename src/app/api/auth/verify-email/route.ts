@@ -38,7 +38,7 @@ function page(message: string, success: boolean): NextResponse {
   return new NextResponse(html, { status: success ? 200 : 400, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
 }
 
-function rateLimitRequest(req: NextRequest): NextResponse | null {
+function rateLimitRequest(req: NextRequest): Response | null {
   const ip = req.headers.get('x-real-ip') || req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
   const rl = rateLimit(`verify:${ip}`, { limit: 20, windowMs: 600_000 })
   return rl.ok ? null : rateLimitedResponse(rl.resetMs)
