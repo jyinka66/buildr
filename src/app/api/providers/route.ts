@@ -5,8 +5,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { loadProviders, seedProviders } from '@/lib/llm/router'
 import { requireAdmin } from '@/lib/admin'
+import { requireSessionUser } from '@/lib/session'
 
 export async function GET() {
+  try {
+    await requireSessionUser()
+  } catch (err) {
+    if ((err as { status?: number }).status === 401) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+    }
+    throw err
+  }
   await seedProviders()
   const providers = await loadProviders()
   // Mask API keys.
