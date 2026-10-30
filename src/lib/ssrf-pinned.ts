@@ -9,8 +9,7 @@ const BLOCKED = [
 ]
 
 function privateAddress(address: string): boolean {
-  if (address.includes(':')) return !address.toLowerCase().startsWith('2') || BLOCKED.some(pattern => pattern.test(address))
-  return BLOCKED.some(pattern => pattern.test(address)) || address.startsWith('100.64.') || address.startsWith('192.0.2.')
+  return isBlockedIp(address)
 }
 
 /** Creates a one-request dispatcher pinned to a checked public DNS answer. */
