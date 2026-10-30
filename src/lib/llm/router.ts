@@ -469,6 +469,57 @@ async function* runOpenAICompatStream(
           ? 'https://generativelanguage.googleapis.com/v1beta/openai'
           : 'http://localhost:11434/v1')
 
+  if (provider.key === 'anthropic') {
+    const system = messages.find((m) => m.role === 'system')?.content ?? ''
+    const conversation = messages.filter((m) => m.role !== 'system')
+    const res = await fetch(`${base}/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'text/event-stream',
+        'x-api-key': provider.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        max_tokens: options.maxTokens ?? 4096,
+        system,
+        messages: conversation.map((m) => ({ role: m.role, content: m.content })),
+        stream: true,
+      }),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+    })
+    if (!res.ok || !res.body) {
+      const detail = (await res.text().catch(() => '')).slice(0, 500)
+      throw new Error(`Anthropic stream error ${res.status}${detail ? `: ${detail}` : ''}`)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        if (!data || data === '[DONE]') continue
+        try {
+          const json = JSON.parse(data)
+          if (json.type === 'content_block_delta' && json.delta?.type === 'text_delta' && json.delta.text) {
+            yield json.delta.text
+          }
+        } catch {
+          // Ignore non-JSON keepalives and unrelated SSE frames.
+        }
+      }
+    }
+    return
+  }
+
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -484,7 +535,10 @@ async function* runOpenAICompatStream(
     }),
     signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
   })
-  if (!res.ok || !res.body) throw new Error(`${provider.name} stream error ${res.status}`)
+  if (!res.ok || !res.body) {
+    const detail = (await res.text().catch(() => '')).slice(0, 500)
+    throw new Error(`${provider.name} stream error ${res.status}${detail ? `: ${detail}` : ''}`)
+  }
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
