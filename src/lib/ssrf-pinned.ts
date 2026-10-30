@@ -3,7 +3,7 @@ import { isIP } from 'node:net'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { Readable } from 'node:stream'
-import { isBlockedIp } from '@/lib/ssrf'
+import { isBlockedIp } from './ssrf-ip.ts'
 
 type AddressRecord = { address: string; family: number }
 
