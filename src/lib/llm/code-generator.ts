@@ -212,6 +212,7 @@ export interface InitialGenerationInput {
   integrations: string[]
   dbConfig: DbConfig
   overrideProvider?: ProviderKey | null
+  maxTokens?: number
 }
 
 export async function generateInitialProject(
@@ -265,7 +266,7 @@ export async function generateInitialProject(
 
   const result = await complete(messages, 'code', {
     temperature: 0.4,
-    maxTokens: 8000,
+    maxTokens: Math.max(1, Math.min(8000, input.maxTokens ?? 8000)),
   }, overrideProvider ?? null)
 
   // 4. Parse LLM files (tolerant: JSON array OR fenced code blocks).
@@ -344,6 +345,7 @@ export interface IncrementalInput {
   history: { role: 'user' | 'assistant'; content: string }[]
   existingFiles: { path: string; content: string }[]
   overrideProvider?: ProviderKey | null
+  maxTokens?: number
 }
 
 export async function generateIncremental(
@@ -387,7 +389,7 @@ export async function generateIncremental(
 
   const result = await complete(messages, 'code', {
     temperature: 0.4,
-    maxTokens: 8000,
+    maxTokens: Math.max(1, Math.min(8000, input.maxTokens ?? 8000)),
   }, overrideProvider ?? null)
 
   const llmFiles = extractFilesFromText(result.content)
