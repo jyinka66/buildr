@@ -25,7 +25,8 @@ test('sandbox runner enforces disposable no-network container and resource restr
 })
 
 test('sandbox worker has no production credentials or permissive unknown-module fallback', () => {
-  assert.match(worker, /module: 'commonjs'/, 'route modules must be transpiled for the isolated CommonJS wrapper')
+  assert.match(worker, /ts\.transpileModule/, 'route source must be transpiled with TypeScript')
+  assert.match(worker, /ts\.ModuleKind\.CommonJS/, 'route modules must be compiled for the isolated CommonJS wrapper')
   assert.match(worker, /External integrations are disabled in the sandbox/)
   assert.match(worker, /Module is not permitted in sandbox/)
   assert.doesNotMatch(worker, /SUPABASE_SERVICE_ROLE_KEY|PAYSTACK_SECRET_KEY|SIDECAR_AUTH_TOKEN/)
