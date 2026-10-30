@@ -110,6 +110,9 @@ export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promi
   }
 
   return await new Promise<Response>((resolve, reject) => {
+    let req: ClientRequest
+    const signal = init.signal
+    const abort = () => req.destroy(signal?.reason instanceof Error ? signal.reason : new Error('safe_fetch_aborted'))
     const onResponse = (res: IncomingMessage) => {
       const responseHeaders = new Headers()
       for (let i = 0; i < res.rawHeaders.length; i += 2) {
@@ -132,12 +135,9 @@ export async function fetchWithPinnedAddress(url: URL, init: RequestInit): Promi
         headers: responseHeaders,
       }))
     }
-    let req: ClientRequest
     if (url.protocol === 'https:') req = httpsRequest(requestOptions, onResponse)
     else req = httpRequest(requestOptions, onResponse)
 
-    const signal = init.signal
-    const abort = () => req.destroy(signal?.reason instanceof Error ? signal.reason : new Error('safe_fetch_aborted'))
     if (signal?.aborted) abort()
     else signal?.addEventListener('abort', abort, { once: true })
     req.once('error', (error) => {
