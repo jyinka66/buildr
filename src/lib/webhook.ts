@@ -3,6 +3,32 @@ import { createHmac, randomBytes } from 'crypto'
 import { db } from '@/lib/db'
 import { safeFetch } from '@/lib/ssrf'
 
+async function readBoundedResponse(response: Response, limit = 2048): Promise<string> {
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    while (size < limit) {
+      const item = await reader.read()
+      if (item.done) break
+      const count = Math.min(item.value.byteLength, limit - size)
+      chunks.push(item.value.slice(0, count))
+      size += count
+      if (count < item.value.byteLength || size === limit) {
+        await reader.cancel().catch(() => {})
+        break
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+  return new TextDecoder().decode(bytes)
+}
+
 export function generateWebhookSecret(): string { return randomBytes(16).toString('hex') }
 
 export function signPayload(payload: string, secret: string): string {
@@ -38,7 +64,7 @@ async function executeDelivery(deliveryId: string, webhookId: string, url: strin
   const timeout = setTimeout(() => controller.abort(), 15000)
   try {
     const res = await safeFetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-buildr-signature': signature, 'user-agent': 'Buildr-Webhook/1.0' }, body: payloadStr, signal: controller.signal })
-    const responseBody = await res.text().catch(() => '')
+    const responseBody = await readBoundedResponse(res).catch(() => '')
     if (res.ok) {
       await db.from('webhook_deliveries').update({ status: 'success', status_code: res.status, response_body: responseBody.slice(0, 2048), delivered_at: new Date().toISOString(), attempt: attempt + 1 }).eq('id', deliveryId)
       await db.from('webhooks').update({ last_triggered_at: new Date().toISOString(), last_status: 'success', last_status_code: res.status, delivery_count: (await getDeliveryCount(webhookId)) + 1 }).eq('id', webhookId)
