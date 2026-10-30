@@ -14,8 +14,12 @@ import { verifyCode, hashBackupCode } from '@/lib/totp'
 const DEV_SECRET = 'buildr-dev-secret-change-in-production'
 const configuredSecret = process.env.NEXTAUTH_SECRET || ''
 const isProduction = process.env.NODE_ENV === 'production'
+// Next evaluates server modules while collecting build-time page data. The
+// production secret must be enforced when the server runs, not while the
+// build is compiling routes; no build-time secret is embedded into the image.
+const isProductionBuild = process.env.NEXT_PHASE === 'phase-production-build'
 
-if (isProduction && (configuredSecret.length < 32 || configuredSecret === DEV_SECRET)) {
+if (isProduction && !isProductionBuild && (configuredSecret.length < 32 || configuredSecret === DEV_SECRET)) {
   throw new Error(
     'NEXTAUTH_SECRET must be at least 32 characters and must not use the dev fallback. ' +
       'Generate one with: openssl rand -base64 32 — and set it in .env',
