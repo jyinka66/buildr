@@ -8,7 +8,7 @@ const provider = (key, overrides = {}) => ({
   key,
   enabled: true,
   health: 'healthy',
-  apiKey: key === 'zai' ? '(managed)' : 'configured-key',
+  apiKey: 'configured-key',
   weight: 1,
   speciality: 'general',
   ...overrides,
@@ -16,6 +16,8 @@ const provider = (key, overrides = {}) => ({
 
 test('router excludes disabled, offline, and unconfigured providers', () => {
   assert.equal(isProviderReady(provider('zai')), true)
+  assert.equal(isProviderReady(provider('zai', { apiKey: '(managed)' })), false)
+  assert.equal(isProviderReady(provider('zai', { apiKey: '' })), false)
   assert.equal(isProviderReady(provider('openai', { apiKey: '' })), false)
   assert.equal(isProviderReady(provider('openai', { apiKey: '(managed)' })), false)
   assert.equal(isProviderReady(provider('openai', { enabled: false })), false)
