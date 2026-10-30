@@ -11,20 +11,25 @@ export async function POST(req: NextRequest) {
   const rl = rateLimit(`reset:${ip}`, { limit: 20, windowMs: 600_000 })
   if (!rl.ok) return rateLimitedResponse(rl.resetMs)
 
-  const { token, password } = (await req.json()) as { token?: string; password?: string }
+  const body = (await req.json().catch(() => null)) as { token?: string; password?: string } | null
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
+  }
+  const { token, password } = body
   if (!token || !password) {
     return NextResponse.json({ error: 'token and password are required.' }, { status: 400 })
   }
-  if (password.length < 8) {
-    return NextResponse.json({ error: 'Password must be at least 8 characters.' }, { status: 400 })
+  if (password.length < 8 || Buffer.byteLength(password, 'utf8') > 72) {
+    return NextResponse.json({ error: 'Password must be at least 8 characters and no more than 72 UTF-8 bytes.' }, { status: 400 })
   }
 
-  const { data: user } = await db
+  const { data: user, error: lookupError } = await db
     .from('users')
     .select('id, email, reset_token, reset_expires')
     .eq('reset_token', token)
     .maybeSingle()
 
+  if (lookupError) return NextResponse.json({ error: 'password_reset_lookup_failed' }, { status: 503 })
   if (!user || !user.reset_token || user.reset_token !== token) {
     return NextResponse.json({ error: 'Invalid or expired reset token.' }, { status: 400 })
   }
@@ -35,7 +40,7 @@ export async function POST(req: NextRequest) {
   }
 
   const hash = await bcrypt.hash(password, 10)
-  await db
+  const { error: updateError } = await db
     .from('users')
     .update({
       password: hash,
@@ -44,7 +49,9 @@ export async function POST(req: NextRequest) {
       email_verified: true, // resetting password also verifies the email
     })
     .eq('id', user.id)
+    .eq('reset_token', token)
 
+  if (updateError) return NextResponse.json({ error: 'password_reset_update_failed' }, { status: 500 })
   await audit('user.password_reset', { email: user.email }, user.id)
 
   return NextResponse.json({ ok: true, message: 'Password reset. You can now sign in.' })
