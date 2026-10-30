@@ -1,6 +1,6 @@
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
-import { createPublicPinnedDispatcher } from '@/lib/ssrf-pinned'
+import { fetchWithPinnedAddress } from '@/lib/ssrf-pinned'
 
 export interface SsrfCheckResult {
   ok: boolean
