@@ -39,6 +39,39 @@ export async function isUrlSafe(urlStr: string, opts?: { resolveDns?: boolean })
   }
 }
 
+function retainTimeoutUntilBodyConsumed(response: Response, cleanup: () => void): Response {
+  if (!response.body) {
+    cleanup()
+    return response
+  }
+  const reader = response.body.getReader()
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const result = await reader.read()
+        if (result.done) {
+          controller.close()
+          cleanup()
+        } else {
+          controller.enqueue(result.value)
+        }
+      } catch (error) {
+        controller.error(error)
+        cleanup()
+      }
+    },
+    async cancel(reason) {
+      cleanup()
+      await reader.cancel(reason)
+    },
+  })
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  })
+}
+
 /** Fetch an untrusted URL with redirect-by-redirect SSRF checks and a hard timeout. */
 export async function safeFetch(
   url: string,
@@ -49,12 +82,24 @@ export async function safeFetch(
   const maxRedirects = opts?.maxRedirects ?? 3
   const controller = new AbortController()
   const externalSignal = init?.signal
-  const timer = setTimeout(() => controller.abort(new Error('safe_fetch_timeout')), timeoutMs)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let cleanedUp = false
+  let timeoutTransferredToBody = false
+  const cleanup = () => {
+    if (cleanedUp) return
+    cleanedUp = true
+    if (timer) clearTimeout(timer)
+    externalSignal?.removeEventListener('abort', abortFromCaller)
+  }
   const abortFromCaller = () => controller.abort(externalSignal?.reason)
   if (externalSignal) {
     if (externalSignal.aborted) abortFromCaller()
     else externalSignal.addEventListener('abort', abortFromCaller, { once: true })
   }
+  timer = setTimeout(() => {
+    controller.abort(new Error('safe_fetch_timeout'))
+    cleanup()
+  }, timeoutMs)
 
   try {
     let current = new URL(url)
@@ -66,10 +111,16 @@ export async function safeFetch(
       const check = await isUrlSafe(current.toString(), { resolveDns: false })
       if (!check.ok) throw new Error(`SSRF blocked: ${check.reason}`)
       const response = await fetchWithPinnedAddress(current, { ...init, method, body, headers, redirect: 'manual', signal: controller.signal })
-      if (![301, 302, 303, 307, 308].includes(response.status)) return response
+      if (![301, 302, 303, 307, 308].includes(response.status)) {
+        timeoutTransferredToBody = Boolean(response.body)
+        return retainTimeoutUntilBodyConsumed(response, cleanup)
+      }
 
       const location = response.headers.get('location')
-      if (!location) return response
+      if (!location) {
+        timeoutTransferredToBody = Boolean(response.body)
+        return retainTimeoutUntilBodyConsumed(response, cleanup)
+      }
       if (redirectCount >= maxRedirects) {
         await response.body?.cancel().catch(() => {})
         throw new Error('safe_fetch_too_many_redirects')
@@ -94,7 +145,6 @@ export async function safeFetch(
       current = next
     }
   } finally {
-    clearTimeout(timer)
-    externalSignal?.removeEventListener('abort', abortFromCaller)
+    if (!timeoutTransferredToBody) cleanup()
   }
 }
