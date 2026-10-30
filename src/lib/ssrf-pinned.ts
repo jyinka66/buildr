@@ -28,9 +28,14 @@ export async function createPublicPinnedDispatcher(host: string): Promise<Agent>
   if (privateAddress(address)) throw new Error('SSRF blocked: private address')
   const pinnedLookup = (
     _hostname: string,
-    _options: unknown,
-    callback: (error: NodeJS.ErrnoException | null, address: string, family?: number) => void,
-  ) => callback(null, address, family)
+    options: unknown,
+    callback: (...args: unknown[]) => void,
+  ) => {
+    const wantsAll = typeof options === 'object' && options !== null &&
+      'all' in options && (options as { all?: boolean }).all === true
+    if (wantsAll) callback(null, [{ address, family }])
+    else callback(null, address, family)
+  }
   return new Agent({ connect: { lookup: pinnedLookup as never } })
 }
 
