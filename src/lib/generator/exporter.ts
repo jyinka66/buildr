@@ -274,7 +274,7 @@ export async function buildPreviewBundle(projectId: string): Promise<{
           `<script>${js.content}</script>`,
         )
       }
-      return { html, isStatic: true }
+      return { html: hardenPreviewHtml(html), isStatic: true }
     }
   }
 
@@ -292,7 +292,7 @@ export async function buildPreviewBundle(projectId: string): Promise<{
       files.map((f) => ({ path: f.path, content: f.content, language: f.language })),
     )
     if (result && result.html) {
-      return { html: result.html, isStatic: result.mode === 'static' }
+      return { html: hardenPreviewHtml(result.html), isStatic: result.mode === 'static' }
     }
   } catch (err) {
     console.error('[Buildr] Interactive preview failed, falling back to structural:', err instanceof Error ? err.message : err)
@@ -346,7 +346,32 @@ window.addEventListener('load', () => {
 </body>
 </html>`
 
-  return { html, isStatic: false }
+  return { html: hardenPreviewHtml(html), isStatic: false }
+}
+
+// The preview is intentionally client-only. This policy blocks network
+// connections, external images/fonts, form submissions, nested frames, and
+// navigation bases while allowing the in-browser React/Babel renderer.
+function hardenPreviewHtml(html: string): string {
+  const csp = [
+    "default-src 'none'",
+    "script-src 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.tailwindcss.com",
+    "style-src 'unsafe-inline'",
+    "img-src data: blob:",
+    "font-src data:",
+    "connect-src 'none'",
+    "media-src data: blob:",
+    "form-action 'none'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-src 'none'",
+    "worker-src 'none'",
+  ].join('; ')
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`
+  if (/<head(?:\\s[^>]*)?>/i.test(html)) {
+    return html.replace(/<head(?:\\s[^>]*)?>/i, (head) => head + meta)
+  }
+  return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`
 }
 
 function escapeHtml(s: string): string {

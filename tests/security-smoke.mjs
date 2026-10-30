@@ -179,3 +179,17 @@ test('public project visibility is owner-controlled and opt-in in the dashboard'
   assert.ok(dashboard.includes('Enable public link') && dashboard.includes('Disable public link'), 'dashboard must expose an explicit visibility toggle')
   assert.ok(publicRoute.includes(".eq('is_public', true)"), 'public endpoint must only serve projects currently opted into sharing')
 })
+
+
+test('browser previews isolate generated code from network and Buildr APIs', () => {
+  const runtime = readFileSync(new URL('../src/lib/generator/preview-runtime.ts', import.meta.url), 'utf8')
+  const exporter = readFileSync(new URL('../src/lib/generator/exporter.ts', import.meta.url), 'utf8')
+  assert.ok(runtime.includes('Network access is disabled in Buildr preview'), 'preview fetch must not reach external services')
+  assert.ok(runtime.includes("error: 'preview_only'"), 'relative API calls should return a preview mock')
+  assert.ok(!runtime.includes('XTransformPort=3030'), 'preview must not forward generated API requests to the sidecar')
+  assert.ok(exporter.includes("connect-src 'none'"), 'preview CSP must block network connections')
+  assert.ok(exporter.includes("form-action 'none'"), 'preview CSP must block form submissions')
+  assert.ok(exporter.includes("frame-src 'none'"), 'preview CSP must block nested frames')
+  assert.ok(exporter.includes('hardenPreviewHtml(html)'), 'static and fallback previews must receive the policy')
+  assert.ok(exporter.includes('hardenPreviewHtml(result.html)'), 'interactive previews must receive the policy')
+})

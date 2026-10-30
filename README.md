@@ -57,6 +57,11 @@ The sandbox integration tests use real Docker containers when `SANDBOX_TEST_URL`
 
 GitHub Actions runs the web build, typecheck, security and deployment tests, live sandbox integration tests, and builds the web, API-runtime, and collaboration Docker images. The sandbox worker image is published to GitHub Container Registry after those jobs succeed.
 
+
+## Free launch mode (no Docker or paid server)
+
+Buildr can launch as a single Next.js app using the existing Vercel configuration and a free-tier Supabase project, subject to each provider's current limits. See [FREE-LAUNCH.md](FREE-LAUNCH.md) for setup. In this mode, users can generate/edit code, save projects, export ZIPs, and use the browser preview. Preview code runs in a sandboxed iframe with network access disabled and mocked API calls; it is not a full-stack runtime. Generated server routes, package installation, and arbitrary app execution remain disabled until a separately isolated execution service is deployed. Do not remove the fail-closed checks or execute generated code inside the main web process.
+
 ## Production configuration
 
 The Render blueprint is in `render.yaml`. Configure its `sync: false` environment variables in the hosting dashboard before deploying. Required values include:

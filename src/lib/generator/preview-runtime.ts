@@ -183,23 +183,23 @@ const RUNTIME_JS = `
     return;
   }
 
-  // ---- fetch interceptor: proxy /api/* calls to the API runtime sidecar -
-  // The sidecar (port 3030) executes the generated route.ts handlers and
-  // returns real responses. Requests without ?XTransformPort go to the
-  // gateway which forwards to 3030. The project ID is appended so the
-  // sidecar knows which project's files to load.
-  (function installFetchInterceptor(){
-    var originalFetch = window.fetch;
-    var pid = window.__buildrProjectId;
-    window.fetch = function(input, init){
+  // ---- safe preview network boundary -----------------------------------
+  // Generated code runs in an opaque-origin sandboxed iframe. The preview
+  // never proxies requests to Buildr's API runtime or to third-party hosts.
+  // CSP below blocks network connections; this wrapper returns deterministic
+  // mock responses for relative API calls so UI states can still be previewed.
+  (function installPreviewFetch(){
+    window.fetch = function(input){
       var url = typeof input === 'string' ? input : (input && input.url) || '';
-      // Only intercept relative /api/* calls (not external URLs).
       if (url.indexOf('/api/') === 0 || url === '/api') {
-        var sep = url.indexOf('?') >= 0 ? '&' : '?';
-        var proxied = url + sep + 'XTransformPort=3030' + (pid ? '&pid=' + encodeURIComponent(pid) : '');
-        return originalFetch.call(window, proxied, init);
+        return Promise.resolve(new Response(JSON.stringify({
+          data: [],
+          preview: true,
+          error: 'preview_only',
+          message: 'API calls are mocked in Buildr preview.'
+        }), { status: 200, headers: { 'content-type': 'application/json' } }));
       }
-      return originalFetch.call(window, input, init);
+      return Promise.reject(new Error('Network access is disabled in Buildr preview.'));
     };
   })();
 
