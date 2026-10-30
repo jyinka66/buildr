@@ -85,6 +85,7 @@ export function ProviderSwitcher() {
           providers.map((p) => (
             <DropdownMenuItem
               key={p.key}
+              disabled={!p.enabled || p.health === 'down' || (p.key !== 'zai' && !p.hasKey)}
               onSelect={() => setActiveProvider(p.key)}
               className="gap-2"
             >
