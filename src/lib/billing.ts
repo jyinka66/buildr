@@ -133,7 +133,7 @@ export async function trackUsage(
 }
 
 export async function releaseUsageReservation(userId: string, reservationId?: string): Promise<void> {
-  if (!reservationId || !isSupabaseConfigured || process.env.NODE_ENV !== 'production' && !isSupabaseConfigured) return
+  if (!reservationId || !isSupabaseConfigured) return
   try {
     const { error } = await db.rpc('release_usage_reservation', {
       p_owner_id: userId,
