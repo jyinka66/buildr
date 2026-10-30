@@ -73,7 +73,7 @@ const server = Bun.serve({ port: PORT, async fetch(req) {
       if (login.code !== 0) throw new Error('sandbox_registry_auth_failed')
     }
     const result = await docker([
-      'run', '--rm', '--name', id, '--pull=missing', '--network=none', '--read-only', '--user=1001:1001',
+      'run', '-i', '--rm', '--name', id, '--pull=missing', '--network=none', '--read-only', '--user=1001:1001',
       '--memory=128m', '--memory-swap=128m', '--cpus=0.50', '--pids-limit=32', '--ipc=private',
       '--cap-drop=ALL', '--security-opt=no-new-privileges:true',
       '--ulimit=nofile=64:64', '--ulimit=fsize=1048576:1048576', '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=8m,uid=1001,gid=1001',
