@@ -1,6 +1,6 @@
 // Pure routing policy shared by normal and streaming completions.
 // A provider is routable only when enabled, not marked offline, and configured.
-// The managed Z.ai integration does not require a user API key.
+// Every hosted provider, including Z.ai, requires a real server-side credential.
 export interface RoutingProvider {
   id: string
   key: string
@@ -13,7 +13,6 @@ export interface RoutingProvider {
 
 export function isProviderReady(provider: RoutingProvider): boolean {
   if (!provider.enabled || provider.health === 'down') return false
-  if (provider.key === 'zai') return true
   const key = provider.apiKey.trim()
   return key.length > 0 && key !== '(managed)'
 }
