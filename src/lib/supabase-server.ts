@@ -89,7 +89,11 @@ import { localDb } from '@/lib/local-store'
 export const db = new Proxy({} as SupabaseClient, {
   get(_target, prop) {
     if (!isSupabaseConfigured) {
-      // Delegate to the local in-memory store (mimics Supabase client API).
+      // Local storage is a development/demo fallback only. Never let a
+      // production deployment silently accept writes into process memory.
+      if (process.env.NODE_ENV === 'production') {
+        throw new SupabaseNotConfiguredError()
+      }
       const localVal = (localDb as unknown as Record<string | symbol, unknown>)[prop]
       return localVal
     }
