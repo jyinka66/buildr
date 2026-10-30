@@ -1,6 +1,5 @@
-// Email service — uses Resend (if RESEND_API_KEY is set) to send
-// transactional emails. Falls back to console.log when not configured
-// (dev mode — the verification/reset link is printed to the server log).
+// Email service — uses Resend for transactional email. In development only,
+// email content may be logged for local testing. Production fails closed.
 
 interface SendEmailInput {
   to: string
@@ -11,8 +10,11 @@ interface SendEmailInput {
 export async function sendEmail({ to, subject, html }: SendEmailInput): Promise<{ ok: boolean; error?: string }> {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
-    // Dev fallback — log the email so the developer can click the link.
-    console.log(`\n📧 [EMAIL] To: ${to}\n   Subject: ${subject}\n   ${html.replace(/<[^>]+>/g, '').slice(0, 500)}\n`)
+    if (process.env.NODE_ENV === 'production') {
+      return { ok: false, error: 'RESEND_API_KEY is not configured' }
+    }
+    // Local-only fallback: allow developers to inspect the verification link.
+    console.log(`\n📧 [EMAIL] To: ${to}\n   Subject: ${subject}\n   ${html.replace(/<[^>]+/g, '').slice(0, 500)}\n`)
     return { ok: true }
   }
 
