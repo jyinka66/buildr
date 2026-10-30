@@ -26,7 +26,7 @@ test('SSRF checks reject loopback, link-local, private IPv6, credentials and non
 test('SSRF transport pins outbound connections to validated public DNS answers', () => {
   const ssrfSource = readFileSync(new URL('../src/lib/ssrf.ts', import.meta.url), 'utf8')
   const pinnedSource = readFileSync(new URL('../src/lib/ssrf-pinned.ts', import.meta.url), 'utf8')
-  assert.ok(ssrfSource.includes("import { fetchWithPinnedAddress } from '@/lib/ssrf-pinned'"), 'safeFetch must use the pinned transport')
+  assert.ok(ssrfSource.includes("import { fetchWithPinnedAddress } from './ssrf-pinned.ts'"), 'safeFetch must use the pinned transport')
   assert.ok(ssrfSource.includes('await fetchWithPinnedAddress(current,'), 'every redirect hop must use the pinned transport')
   assert.ok(!ssrfSource.includes('await fetch(current,'), 'untrusted destinations must not use global fetch')
   assert.ok(pinnedSource.includes("lookup(hostname, { all: true, verbatim: true })"), 'transport must resolve all DNS answers')
