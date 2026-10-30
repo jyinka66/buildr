@@ -40,7 +40,7 @@ export function AuthDialog() {
     e.preventDefault()
     if (mode === 'register') {
       const ok = await register({ email, password, name: name || undefined })
-      if (ok) toast.success('Welcome to Buildr!', { description: 'Your account is ready.' })
+      if (ok) toast.success('Check your email', { description: 'We sent a verification link. You must confirm your email before signing in.' })
     } else {
       const ok = await login(email, password)
       if (ok) toast.success('Signed in', { description: email })
