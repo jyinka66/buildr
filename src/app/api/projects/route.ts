@@ -190,6 +190,7 @@ export async function POST(req: NextRequest) {
         projectId, reservationId: tokenLimit?.reservationId,
       })
       if (!tokenUsageRecorded) {
+        await releaseUsageReservation(user.id, tokenLimit?.reservationId)
         return NextResponse.json({ error: 'usage_commit_failed', message: 'Generation completed, but token usage could not be committed safely.' }, { status: 503 })
       }
       const { data: freshRow } = await db
@@ -200,6 +201,9 @@ export async function POST(req: NextRequest) {
       const view = await toProjectView(freshRow as ProjectDbRow | null)
       return NextResponse.json({ project: view, generation: result }, { status: 201 })
     } catch (err) {
+      // A failed provider/model generation must not hold the full monthly
+      // token reservation until its timeout; release it immediately so retry works.
+      await releaseUsageReservation(user.id, tokenLimit?.reservationId)
       const message = err instanceof Error ? err.message : 'generation_failed'
       const { data: freshRow } = await db
         .from('projects')
