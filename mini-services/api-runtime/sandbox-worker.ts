@@ -6,7 +6,7 @@ const input = JSON.parse(readFileSync(0, 'utf8')) as {
   body: string | null; headers: [string, string][]
 }
 const files = new Map(Object.entries(input.files || {}))
-const transpiler = new Bun.Transpiler({ loader: 'ts', target: 'bun', tsconfig: { compilerOptions: { jsx: 'react-jsx', strict: false, module: 'esnext', moduleResolution: 'bundler' } } })
+const transpiler = new Bun.Transpiler({ loader: 'ts', target: 'bun', tsconfig: { compilerOptions: { jsx: 'react-jsx', strict: false, module: 'commonjs', moduleResolution: 'bundler' } } })
 
 function buildRequire(routePath: string) {
   const mocks: Record<string, any> = {
