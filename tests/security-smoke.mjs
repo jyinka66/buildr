@@ -78,6 +78,7 @@ test('registration and credentials login retain password and account-state safeg
   assert.ok(register.includes('rateLimit('), 'registration must be rate limited')
   assert.ok(register.includes('.select(\'id, email, name\')'), 'registration response must not return password or private user fields')
   assert.ok(auth.includes('bcrypt.compare(password, user.password)'), 'login must verify the password hash')
+  assert.ok(auth.includes('rateLimit(`login:${email}`'), 'login must throttle repeated attempts for the same normalized account')
   assert.ok(auth.includes('if (user.is_disabled) return null'), 'disabled accounts must not authenticate')
   assert.ok(auth.includes('if (user.totp_enabled)'), 'login must preserve optional two-factor verification')
 })
