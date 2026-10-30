@@ -38,7 +38,7 @@ test('SSRF transport pins outbound connections to validated public DNS answers',
 
 test('quota and rate-limit enforcement use service-only atomic database RPCs', () => {
   const billing = readFileSync(new URL('../src/lib/billing.ts', import.meta.url), 'utf8')
-  const limiter = readFileSync(new URL('../src/lib/rate-limit.ts', import.meta.url), 'utf8')
+  const limiter = readFileSync(new URL('../src/lib/distributed-rate-limit.ts', import.meta.url), 'utf8')
   assert.ok(billing.includes("db.rpc('reserve_usage'"), 'quota checks must reserve capacity atomically')
   assert.ok(billing.includes("db.rpc('commit_usage_reservation'"), 'actual usage must commit against a reservation')
   assert.ok(limiter.includes("db.rpc('consume_rate_limit'"), 'security-sensitive limits must be shared across instances')
