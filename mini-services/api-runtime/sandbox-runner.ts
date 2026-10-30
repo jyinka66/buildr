@@ -80,7 +80,13 @@ const server = Bun.serve({ port: PORT, async fetch(req) {
       '--env=NODE_ENV=production', IMAGE, 'bun', 'run', '/app/sandbox-worker.ts'
     ], JSON.stringify(payload), TIMEOUT_MS)
     completed = true
-    if (result.code !== 0) return Response.json({ error: 'sandbox_failed', detail: 'Execution container failed.' }, { status: 502 })
+    if (result.code !== 0) {
+      // Detailed diagnostics are opt-in for CI; never return container stderr to callers.
+      if (process.env.SANDBOX_DEBUG === '1') {
+        console.error('[sandbox] execution container exited nonzero', { code: result.code, stderr: result.stderr.slice(0, 1500) })
+      }
+      return Response.json({ error: 'sandbox_failed', detail: 'Execution container failed.' }, { status: 502 })
+    }
     if (Buffer.byteLength(result.stdout) > MAX_OUTPUT_BYTES) return Response.json({ error: 'sandbox_output_too_large' }, { status: 502 })
     let output: any
     try { output = JSON.parse(result.stdout) } catch { return Response.json({ error: 'invalid_sandbox_response' }, { status: 502 }) }
