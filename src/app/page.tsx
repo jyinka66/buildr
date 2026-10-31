@@ -3,7 +3,8 @@
 // Buildr — single user-visible route ("/").
 // Renders the global shell + the active view from the Zustand store.
 
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
+import { toast } from 'sonner'
 import { useBuilder, authMessage } from '@/lib/store'
 import { AppHeader, AppFooter } from '@/components/builder/app-shell'
 import { AppSidebar, AppTopBar } from '@/components/builder/app-sidebar'
@@ -32,6 +33,17 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Loader2, TriangleAlert, Wrench } from 'lucide-react'
 
+// Result of connecting a social account, read from the redirect back from the platform.
+const SOCIAL_LABELS: Record<string, string> = { linkedin: 'LinkedIn', x: 'X', meta: 'Facebook Pages', instagram: 'Instagram', tiktok: 'TikTok' }
+const SOCIAL_ERRORS: Record<string, string> = {
+  sign_in_required: 'Sign in to Buildr first, then connect the account.',
+  not_configured: 'Sign-in for this platform is not set up on this server yet.',
+  denied: 'The connection was cancelled on the platform, so nothing was saved.',
+  invalid_state: 'The connection could not be verified. Please try connecting again.',
+  no_accounts: 'No account was found to connect. For Instagram, link an Instagram business account to your Facebook Page first.',
+  failed: 'The platform did not complete the connection. Please try again.',
+}
+
 export default function Home() {
   const view = useBuilder((s) => s.view)
   const boot = useBuilder((s) => s.boot)
@@ -41,6 +53,8 @@ export default function Home() {
   const openAuth = useBuilder((s) => s.openAuth)
   const openReset = useBuilder((s) => s.openReset)
   const showAuthError = useBuilder((s) => s.showAuthError)
+  const openMarketing = useBuilder((s) => s.openMarketing)
+  const socialNotice = useRef<{ ok: boolean; text: string } | null>(null)
 
   useEffect(() => {
     if (!booted) boot()
@@ -55,18 +69,35 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search)
     const reset = params.get('reset')
     const err = params.get('error')
+    const social = params.get('social')
+    const socialError = params.get('social_error')
+    const label = SOCIAL_LABELS[params.get('platform') ?? ''] ?? 'The account'
     if (reset && /^[a-f0-9]{64}$/i.test(reset)) {
       openReset(reset)
     } else if (err) {
       showAuthError(authMessage(err))
+    } else if (social === 'connected') {
+      const count = Number(params.get('count') ?? '1')
+      socialNotice.current = { ok: true, text: count > 1 ? `${count} ${label} accounts connected.` : `${label} connected. You can now schedule posts to it.` }
+    } else if (socialError) {
+      socialNotice.current = { ok: false, text: `${label}: ${SOCIAL_ERRORS[socialError] ?? SOCIAL_ERRORS.failed}` }
     } else {
       return
     }
-    params.delete('reset')
-    params.delete('error')
+    for (const key of ['reset', 'error', 'social', 'social_error', 'platform', 'count']) params.delete(key)
     const rest = params.toString()
     window.history.replaceState({}, '', rest ? `/?${rest}` : '/')
   }, [openReset, showAuthError])
+
+  // Show the social connect result once the session is known, and land on the scheduler page.
+  useEffect(() => {
+    const notice = socialNotice.current
+    if (!booted || !notice) return
+    socialNotice.current = null
+    if (notice.ok) toast.success(notice.text)
+    else toast.error(notice.text)
+    if (session) void openMarketing()
+  }, [booted, session, openMarketing])
 
   // Hidden admin login: visiting /?admin=1 opens the auth dialog.
   useEffect(() => {

@@ -42,6 +42,8 @@ function toPostView(row: Record<string, unknown>) {
     scheduledAt: row.scheduled_at,
     status: row.status,
     campaignId: row.campaign_id ?? null,
+    postedAt: row.posted_at ?? null,
+    results: row.post_results && typeof row.post_results === 'object' ? row.post_results : {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -74,7 +76,7 @@ export async function PATCH(
   // Verify ownership.
   const { data: existing } = await db
     .from('scheduled_posts')
-    .select('owner_id')
+    .select('owner_id, status')
     .eq('id', id)
     .maybeSingle()
 
@@ -83,6 +85,11 @@ export async function PATCH(
   }
   if (existing.owner_id !== user.id) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
+  // While the publisher is sending a post, changing it (or putting it back to "scheduled")
+  // could make it go out twice. Wait for it to finish.
+  if (existing.status === 'posting') {
+    return NextResponse.json({ error: 'post_is_publishing', message: 'This post is being published right now. Try again in a minute.' }, { status: 409 })
   }
 
   const body = (await req.json().catch(() => ({}))) as PatchBody

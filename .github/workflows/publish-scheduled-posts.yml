@@ -1,0 +1,40 @@
+name: Publish scheduled posts
+
+# Calls the app every 5 minutes so due social posts are published.
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   APP_URL      the public address of the app, e.g. https://your-app.example.com (no trailing slash)
+#   CRON_SECRET  the same value as the CRON_SECRET environment variable on the server
+#
+# GitHub runs scheduled workflows on a best-effort basis, so a post can go out a few minutes
+# after its scheduled time, and GitHub pauses schedules on repositories with no activity for
+# 60 days. Re-enable it from the Actions tab if that happens.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-scheduled-posts
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call the publish endpoint
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "APP_URL and CRON_SECRET repository secrets must be set." >&2
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --max-time 90 \
+            -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${APP_URL%/}/api/cron/publish-scheduled"

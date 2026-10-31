@@ -1,6 +1,6 @@
 // GET  /api/marketing/accounts — list connected social accounts.
-// POST /api/marketing/accounts — "connect" a social account (mock OAuth — stores
-//   platform + account name only since we don't have real OAuth credentials).
+// POST /api/marketing/accounts — add a placeholder account (name only, no token). It cannot
+//   publish; real accounts are linked through /api/marketing/accounts/oauth/<platform>/start.
 // ------------------------------------------------------------------
 // POST body: { platform, accountName }
 //   platform ∈ {meta, x, linkedin, instagram, tiktok}
@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireSessionUser } from '@/lib/session'
+import { configuredPlatforms } from '@/lib/social/providers'
 
 const VALID_PLATFORMS = new Set(['meta', 'x', 'linkedin', 'instagram', 'tiktok'])
 
@@ -36,6 +37,8 @@ function toAccountView(row: Record<string, unknown>) {
     handle: (metadata.handle as string | undefined) ?? null,
     avatarUrl: (metadata.avatarUrl as string | undefined) ?? null,
     connected: row.is_connected ?? true,
+    // Only accounts linked through real OAuth hold a token and can publish.
+    canPublish: typeof row.access_token === 'string' && row.access_token.length > 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -62,7 +65,8 @@ export async function GET() {
   }
 
   const accounts = (data || []).map((row: Record<string, unknown>) => toAccountView(row))
-  return NextResponse.json({ accounts })
+  // `providers` tells the UI which platforms have real OAuth set up on this server.
+  return NextResponse.json({ accounts, providers: configuredPlatforms(process.env) })
 }
 
 interface ConnectBody {
@@ -71,7 +75,7 @@ interface ConnectBody {
   handle?: string
 }
 
-// POST — connect a social account (mock OAuth).
+// POST — add a placeholder account (cannot publish; see the OAuth routes for real ones).
 export async function POST(req: NextRequest) {
   let user
   try {

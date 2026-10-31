@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireSessionUser } from '@/lib/session'
 
-const VALID_STATUSES = new Set(['scheduled', 'posted', 'failed', 'draft'])
+const VALID_STATUSES = new Set(['scheduled', 'posting', 'posted', 'failed', 'draft'])
 const VALID_PLATFORMS = new Set(['meta', 'x', 'linkedin', 'instagram', 'tiktok'])
 
 function unauthorized() {
@@ -46,6 +46,8 @@ function toPostView(row: Record<string, unknown>) {
     scheduledAt: row.scheduled_at,
     status: row.status,
     campaignId: row.campaign_id ?? null,
+    postedAt: row.posted_at ?? null,
+    results: row.post_results && typeof row.post_results === 'object' ? row.post_results : {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

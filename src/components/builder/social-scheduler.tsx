@@ -113,8 +113,23 @@ interface ScheduledPost {
   scheduledAt: string
   status: string
   campaignId?: string | null
+  postedAt?: string | null
+  results?: Record<string, PlatformResult>
   createdAt?: string
   updatedAt?: string
+}
+
+interface AccountResult {
+  ok: boolean
+  name?: string
+  url?: string | null
+  error?: string
+}
+
+interface PlatformResult {
+  ok: boolean
+  error?: string
+  accounts?: Record<string, AccountResult>
 }
 
 interface SocialAccount {
@@ -124,6 +139,8 @@ interface SocialAccount {
   handle?: string | null
   avatarUrl?: string | null
   connected?: boolean
+  /** False for placeholder accounts that were added without real OAuth. */
+  canPublish?: boolean
   createdAt?: string
 }
 
@@ -150,6 +167,7 @@ const PLATFORM_MAP: Record<string, (typeof PLATFORMS)[number]> = PLATFORMS.reduc
 
 const STATUS_STYLE: Record<string, string> = {
   scheduled: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300',
+  posting: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
   posted: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
   failed: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
   draft: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-500/15 dark:text-zinc-300',
@@ -230,10 +248,10 @@ async function apiDeletePost(id: string): Promise<void> {
   await jsonOrThrow<{ ok: boolean }>(res)
 }
 
-async function apiListAccounts(): Promise<SocialAccount[]> {
+async function apiListAccounts(): Promise<{ accounts: SocialAccount[]; providers: Record<string, boolean> }> {
   const res = await fetch('/api/marketing/accounts', { cache: 'no-store' })
-  const data = await jsonOrThrow<{ accounts: SocialAccount[] }>(res)
-  return data.accounts
+  const data = await jsonOrThrow<{ accounts: SocialAccount[]; providers?: Record<string, boolean> }>(res)
+  return { accounts: data.accounts, providers: data.providers ?? {} }
 }
 
 async function apiConnectAccount(body: { platform: string; accountName: string; handle?: string }): Promise<SocialAccount> {
@@ -298,6 +316,7 @@ function charLimitFor(platforms: string[]): number {
 export function SocialScheduler() {
   const [posts, setPosts] = React.useState<ScheduledPost[]>([])
   const [accounts, setAccounts] = React.useState<SocialAccount[]>([])
+  const [providers, setProviders] = React.useState<Record<string, boolean>>({})
   const [loadingPosts, setLoadingPosts] = React.useState(true)
   const [loadingAccounts, setLoadingAccounts] = React.useState(true)
   const [calendarMode, setCalendarMode] = React.useState<'week' | 'month'>('week')
@@ -323,11 +342,25 @@ export function SocialScheduler() {
     }
   }, [statusFilter])
 
+  // Put a failed post back in the queue. Accounts that already posted are skipped by the
+  // publisher, so only the failed ones are tried again.
+  async function handleRetry(post: ScheduledPost) {
+    try {
+      await apiUpdatePost(post.id, { status: 'scheduled', scheduledAt: new Date().toISOString() })
+      toast.success('Retry queued. It will be published within a few minutes.')
+      setDetailPost(null)
+      void refreshPosts()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not retry the post.')
+    }
+  }
+
   const refreshAccounts = React.useCallback(async () => {
     setLoadingAccounts(true)
     try {
-      const list = await apiListAccounts()
+      const { accounts: list, providers: configured } = await apiListAccounts()
       setAccounts(list)
+      setProviders(configured)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load accounts.')
     } finally {
@@ -430,6 +463,7 @@ export function SocialScheduler() {
       {/* Connected accounts bar */}
       <ConnectedAccountsBar
         accounts={accounts}
+        providers={providers}
         loading={loadingAccounts}
         onChange={refreshAccounts}
       />
@@ -653,7 +687,7 @@ export function SocialScheduler() {
       />
 
       {/* Detail dialog */}
-      <PostDetailDialog post={detailPost} onClose={() => setDetailPost(null)} />
+      <PostDetailDialog post={detailPost} onClose={() => setDetailPost(null)} onRetry={handleRetry} />
     </div>
   )
 }
@@ -664,10 +698,12 @@ export function SocialScheduler() {
 
 function ConnectedAccountsBar({
   accounts,
+  providers,
   loading,
   onChange,
 }: {
   accounts: SocialAccount[]
+  providers: Record<string, boolean>
   loading: boolean
   onChange: () => void
 }) {
@@ -699,6 +735,7 @@ function ConnectedAccountsBar({
             </Button>
           </DialogTrigger>
           <ConnectAccountDialog
+            providers={providers}
             onClose={() => setOpen(false)}
             onConnected={() => {
               setOpen(false)
@@ -719,6 +756,14 @@ function AccountChip({ account, onChange }: { account: SocialAccount; onChange: 
       <span className={cn('inline-flex', p?.color)}>{p?.icon ?? <Plug className="h-3.5 w-3.5" />}</span>
       <span className="font-medium">{account.accountName}</span>
       {account.handle && <span className="text-muted-foreground">@{account.handle}</span>}
+      {account.canPublish === false && (
+        <span
+          className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+          title="This account was added without signing in to the platform, so posts cannot be published to it. Disconnect it and connect it again."
+        >
+          not linked
+        </span>
+      )}
       <button
         disabled={removing}
         onClick={async () => {
@@ -743,9 +788,11 @@ function AccountChip({ account, onChange }: { account: SocialAccount; onChange: 
 }
 
 function ConnectAccountDialog({
+  providers,
   onClose,
   onConnected,
 }: {
+  providers: Record<string, boolean>
   onClose: () => void
   onConnected: () => void
 }) {
@@ -775,15 +822,34 @@ function ConnectAccountDialog({
     }
   }
 
+  // When this server has OAuth credentials for the platform, connecting signs in on the
+  // platform itself so posts can really be published. Otherwise only a placeholder is possible.
+  const live = providers[platform] === true
+  const platformLabel = PLATFORM_MAP[platform]?.label ?? platform
+
   return (
     <DialogContent className="sm:max-w-md">
       <DialogHeader>
         <DialogTitle>Connect a social account</DialogTitle>
         <DialogDescription>
-          Mock OAuth — we&apos;ll store the platform + account name only. Use real OAuth credentials in production.
+          {live
+            ? `You will sign in on ${platformLabel} and approve posting. Buildr stores the access token encrypted.`
+            : `${platformLabel} sign-in is not set up on this server yet, so a placeholder account is saved. Posts cannot be published to a placeholder. See SOCIAL-PUBLISHING.md to add the ${platformLabel} credentials.`}
         </DialogDescription>
       </DialogHeader>
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form
+        onSubmit={
+          live
+            ? (e) => {
+                e.preventDefault()
+                // Full-page navigation on purpose: this is an API route that redirects to the platform.
+                // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+                window.location.assign(`/api/marketing/accounts/oauth/${platform}/start`)
+              }
+            : handleSubmit
+        }
+        className="space-y-4"
+      >
         <div className="space-y-1.5">
           <Label htmlFor="connect-platform">Platform</Label>
           <Select value={platform} onValueChange={setPlatform}>
@@ -802,6 +868,7 @@ function ConnectAccountDialog({
             </SelectContent>
           </Select>
         </div>
+        {!live && (<>
         <div className="space-y-1.5">
           <Label htmlFor="connect-name">Account name</Label>
           <Input
@@ -821,13 +888,14 @@ function ConnectAccountDialog({
             placeholder="@acme"
           />
         </div>
+        </>)}
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
           <Button type="submit" disabled={saving}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
-            Connect
+            {live ? `Continue to ${platformLabel}` : 'Save placeholder'}
           </Button>
         </DialogFooter>
       </form>
@@ -925,7 +993,44 @@ function PostCard({
 // Post Detail Dialog
 // ---------------------------------------------------------------------------
 
-function PostDetailDialog({ post, onClose }: { post: ScheduledPost | null; onClose: () => void }) {
+function PostResults({ results }: { results: Record<string, PlatformResult> }) {
+  const entries = Object.entries(results).filter(([platform]) => !platform.startsWith('_'))
+  if (entries.length === 0) return null
+  return (
+    <div className="space-y-2 rounded-md border p-3 text-xs">
+      <div className="font-medium">Publishing results</div>
+      {entries.map(([platform, result]) => (
+        <div key={platform} className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <PlatformBadge platform={platform} />
+            <span className={result.ok ? 'text-emerald-600' : 'text-rose-600'}>{result.ok ? 'Posted' : 'Failed'}</span>
+          </div>
+          {result.error && <p className="text-rose-600">{result.error}</p>}
+          {Object.entries(result.accounts ?? {}).map(([id, a]) => (
+            <p key={id} className="pl-1 text-muted-foreground">
+              {a.name ?? id}:{' '}
+              {a.ok ? (
+                a.url ? <a className="underline" href={a.url} target="_blank" rel="noreferrer noopener">view post</a> : 'posted'
+              ) : (
+                <span className="text-rose-600">{a.error ?? 'failed'}</span>
+              )}
+            </p>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PostDetailDialog({
+  post,
+  onClose,
+  onRetry,
+}: {
+  post: ScheduledPost | null
+  onClose: () => void
+  onRetry: (post: ScheduledPost) => Promise<void>
+}) {
   return (
     <Dialog open={!!post} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -969,8 +1074,12 @@ function PostDetailDialog({ post, onClose }: { post: ScheduledPost | null; onClo
                   {post.mediaUrls.length} media attachment{post.mediaUrls.length === 1 ? '' : 's'}
                 </div>
               )}
+              {post.results && <PostResults results={post.results} />}
             </div>
             <DialogFooter>
+              {post.status === 'failed' && (
+                <Button variant="outline" onClick={() => void onRetry(post)}>Retry failed platforms</Button>
+              )}
               <Button variant="ghost" onClick={onClose}>Close</Button>
             </DialogFooter>
           </>
