@@ -158,3 +158,15 @@ test('Build this app reuses the New project dialog and leaves the builder untouc
   assert.match(dialog, /initialPrompt\?: string/)
   assert.match(dialog, /initialName = ''/)
 })
+
+test('groupByRecency buckets chats like a sidebar', async () => {
+  const { groupByRecency } = await import('../src/lib/chat-history.ts')
+  const now = new Date('2026-10-31T15:00:00').getTime()
+  const iso = (d) => new Date(now - d * 24 * 3600 * 1000).toISOString()
+  const groups = groupByRecency(
+    [{ updatedAt: iso(0.01) }, { updatedAt: iso(1) }, { updatedAt: iso(4) }, { updatedAt: iso(30) }, { updatedAt: 'bad' }],
+    now,
+  )
+  assert.deepEqual(groups.map((g) => g.label), ['Today', 'Yesterday', 'Previous 7 days', 'Older'])
+  assert.equal(groups[3].items.length, 2)
+})

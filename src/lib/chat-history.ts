@@ -99,3 +99,27 @@ export function buildProjectSeed(messages: StoredChatMessage[]): { name: string;
   }
   return { name, prompt: parts.length ? PROJECT_PROMPT_HEADER + parts.join('\n\n') : '' }
 }
+
+// Group chats like a chat app sidebar: Today, Yesterday, Previous 7 days, Older.
+// Input order is kept inside each group (the API already sorts newest first).
+export function groupByRecency<T extends { updatedAt: string }>(
+  items: T[],
+  now: number = Date.now(),
+): { label: string; items: T[] }[] {
+  const startOfToday = new Date(now)
+  startOfToday.setHours(0, 0, 0, 0)
+  const day = 24 * 60 * 60 * 1000
+  const today = startOfToday.getTime()
+  const buckets: { label: string; items: T[] }[] = [
+    { label: 'Today', items: [] },
+    { label: 'Yesterday', items: [] },
+    { label: 'Previous 7 days', items: [] },
+    { label: 'Older', items: [] },
+  ]
+  for (const item of items) {
+    const t = new Date(item.updatedAt).getTime()
+    const i = !Number.isFinite(t) || t < today - 6 * day ? 3 : t >= today ? 0 : t >= today - day ? 1 : 2
+    buckets[i].items.push(item)
+  }
+  return buckets.filter((b) => b.items.length > 0)
+}
