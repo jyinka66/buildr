@@ -149,6 +149,33 @@ export interface GenContext {
   existingFiles: { path: string }[]
 }
 
+// Plain, structured result messages shown in the chat after a build.
+export function describeChanges(ops: { path: string; action: string }[]): string {
+  const label = (a: string) => (a === 'create' ? 'New' : a === 'delete' ? 'Removed' : 'Updated')
+  const lines = ops.map((o) => `- ${label(o.action)}: \`${o.path}\``)
+  return [
+    `**Done.** ${ops.length} file${ops.length === 1 ? '' : 's'} changed.`,
+    '',
+    ...lines,
+    '',
+    'Check the preview to see it. Tell me what to adjust next.',
+  ].join('\n')
+}
+
+export function describeInitialBuild(paths: string[], total: number): string {
+  const shown = paths.slice(0, 12).map((p) => `- \`${p}\``)
+  const more = paths.length > 12 ? [`- and ${paths.length - 12} more`] : []
+  return [
+    `**Your app is ready.** ${total} files created.`,
+    '',
+    '**Main files**',
+    ...shown,
+    ...more,
+    '',
+    'Open the preview to try it, or tell me what to change or add next.',
+  ].join('\n')
+}
+
 export function buildSystemPrompt(ctx: GenContext): string {
   return [
     'You are Buildr, an enterprise-grade full-stack code generator.',
@@ -193,6 +220,17 @@ export function buildSystemPrompt(ctx: GenContext): string {
     '- Keep the response under 12 files. Prefer fewer, complete files.',
     '- If the user asks to "update" or "add a feature", only emit the changed/new files.',
     '- Real, runnable code. No TODOs, no placeholders.',
+    '',
+    'QUALITY BAR (what separates shipped apps from demos):',
+    '- Clean structure: small focused components, one responsibility per file, shared types in one place, no duplicated logic.',
+    '- Strict TypeScript: no "any", explicit prop and return types, handle null/undefined.',
+    '- Every screen handles loading, empty, and error states with clear user-facing wording.',
+    '- Forms validate input, show inline errors, and disable submit while sending.',
+    '- Accessible and responsive: semantic HTML, labels on inputs, visible focus, works at phone width first.',
+    '- Consistent, polished UI: one spacing scale, one color palette, real sample content (never "Lorem ipsum").',
+    '- Secure by default: never put secrets in client code, validate and escape user input, check auth on every protected route.',
+    '- Imports must resolve to files you emit or to files in the scaffold; never reference a file that does not exist.',
+    '- When changing an existing app, keep its conventions and do not rewrite files you do not need to touch.',
     '',
     'Return ONLY files. No preamble, no postscript.',
   ].join('\n')
@@ -303,7 +341,7 @@ export async function generateInitialProject(
 
   const assistantMessage =
     llmFiles.length > 0
-      ? `Generated ${files.length} files for your ${stack} project: ${llmFiles.length} AI-authored files layered onto the ${scaffold.length}-file scaffold and ${integrationFiles.length} integration files. Ready to preview and export.`
+      ? describeInitialBuild(llmFiles.map((f) => f.path), files.length)
       : `Scaffolded ${files.length} files for your ${stack} project. The AI code generation step didn't return structured files, so the base template is in place — describe what to build in chat to add features.`
 
   await db.from('generations').insert({
@@ -426,7 +464,7 @@ export async function generateIncremental(
 
   const assistantMessage =
     llmFiles.length > 0
-      ? `Applied ${llmFiles.length} file change${llmFiles.length === 1 ? '' : 's'}: ${fileOps.map((o) => o.path).join(', ')}.`
+      ? describeChanges(fileOps)
       : `I couldn't parse structured file changes from the model response. Try rephrasing, e.g. "Add a login page" or "Create an API route at /api/users".`
 
   await db.from('generations').insert({

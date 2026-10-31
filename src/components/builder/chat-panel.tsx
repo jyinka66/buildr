@@ -9,7 +9,6 @@
 
 import * as React from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import ReactMarkdown from 'react-markdown'
 import {
   AlertTriangle,
   Bot,
@@ -25,6 +24,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useBuilder, type ChatMode } from '@/lib/store'
+import { Markdown, CopyButton, formatTranscript } from '@/components/builder/markdown'
 import { ThinkingBlock } from '@/components/builder/thinking-block'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
@@ -66,7 +66,7 @@ function FileOpBadge({ op }: { op: FileOp }) {
   )
 }
 
-function MessageBubble({ msg, providers, streaming, streamingActive }: { msg: GenerationView; providers: ProviderWithKey[]; streaming?: boolean; streamingActive?: boolean }) {
+function MessageBubble({ msg, providers, streaming, streamingActive, isAdmin }: { msg: GenerationView; providers: ProviderWithKey[]; streaming?: boolean; streamingActive?: boolean; isAdmin?: boolean }) {
   const isUser = msg.role === 'user'
   const isAssistant = msg.role === 'assistant'
   const provider = msg.providerId
@@ -116,8 +116,8 @@ function MessageBubble({ msg, providers, streaming, streamingActive }: { msg: Ge
             )}
           >
             {isAssistant ? (
-              <div className="prose prose-sm dark:prose-invert max-w-none break-words [&>p]:m-0 [&>pre]:rounded-md [&>pre]:bg-zinc-950 [&>pre]:p-3 [&>code]:rounded [&>code]:bg-zinc-950/60 [&>code]:px-1 [&>code]:py-0.5 [&>code]:text-xs">
-                <ReactMarkdown>{msg.content || ''}</ReactMarkdown>
+              <div>
+                <Markdown>{msg.content || ''}</Markdown>
                 {streamingActive ? (
                   <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-emerald-500 align-middle" />
                 ) : null}
@@ -136,25 +136,16 @@ function MessageBubble({ msg, providers, streaming, streamingActive }: { msg: Ge
           </div>
         ) : null}
 
-        {isAssistant && !streaming ? (
+        {!streaming && msg.content ? (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-0.5 text-[11px] text-muted-foreground">
-            {provider ? (
-              <span className="inline-flex items-center gap-1">
-                <span
-                  className={cn(
-                    'h-1.5 w-1.5 rounded-full',
-                    provider.health === 'healthy' ? 'bg-emerald-500' : provider.health === 'degraded' ? 'bg-amber-500' : 'bg-zinc-400',
-                  )}
-                />
-                {provider.name}
-              </span>
-            ) : null}
-            {msg.tokens > 0 ? (
+            <CopyButton text={msg.content} label="Copy message" iconOnly={false} className="-ml-1.5" />
+            {isAssistant && isAdmin && provider ? <span>{provider.name}</span> : null}
+            {isAssistant && isAdmin && msg.tokens > 0 ? (
               <span className="inline-flex items-center gap-0.5">
                 <Zap className="h-3 w-3" /> {msg.tokens} tok
               </span>
             ) : null}
-            {msg.durationMs > 0 ? (
+            {isAssistant && isAdmin && msg.durationMs > 0 ? (
               <span className="inline-flex items-center gap-0.5">
                 <Clock className="h-3 w-3" /> {(msg.durationMs / 1000).toFixed(1)}s
               </span>
@@ -185,6 +176,7 @@ export function ChatPanel({ onSend }: ChatPanelProps) {
   const setChatMode = useBuilder((s) => s.setChatMode)
   const chatStreaming = useBuilder((s) => s.chatStreaming)
   const stopChat = useBuilder((s) => s.stopChat)
+  const isAdmin = useBuilder((s) => !!s.session?.user.isAdmin)
 
   const [input, setInput] = React.useState('')
   const scrollRef = React.useRef<HTMLDivElement>(null)
@@ -223,7 +215,16 @@ export function ChatPanel({ onSend }: ChatPanelProps) {
       <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
         <Sparkles className="h-4 w-4 text-emerald-600" />
         <span className="text-sm font-medium">Chat</span>
-        <span className="ml-auto text-[11px] text-muted-foreground">{generations.length} msgs</span>
+        <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
+          {generations.some((g) => g.content) ? (
+            <CopyButton
+              text={formatTranscript(generations)}
+              label="Copy conversation"
+              iconOnly={false}
+              className="gap-1"
+            />
+          ) : null}
+        </span>
       </div>
 
       {/* Messages */}
@@ -241,6 +242,7 @@ export function ChatPanel({ onSend }: ChatPanelProps) {
                   key={g.id}
                   msg={g}
                   providers={providers}
+                  isAdmin={isAdmin}
                   streaming={generating && g.content.length === 0 && g.role === 'assistant' && g.id === generations[generations.length - 1]?.id}
                   streamingActive={generating && g.role === 'assistant' && g.content.length > 0 && g.id === generations[generations.length - 1]?.id}
                 />

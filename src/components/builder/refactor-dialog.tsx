@@ -48,6 +48,7 @@ export function RefactorDialog({ open, onOpenChange, projectId }: Props) {
   const [applying, setApplying] = React.useState(false)
   const [result, setResult] = React.useState<RefactorResult | null>(null)
   const activeProviderKey = useBuilder((s) => s.activeProviderKey)
+  const isAdmin = useBuilder((s) => !!s.session?.user.isAdmin)
 
   const handlePreview = async () => {
     if (!instruction.trim()) {
@@ -163,9 +164,11 @@ export function RefactorDialog({ open, onOpenChange, projectId }: Props) {
                 <span className="text-sm font-medium">
                   {result.affectedCount} file{result.affectedCount === 1 ? '' : 's'} affected
                 </span>
-                <Badge variant="secondary" className="ml-auto text-[10px]">
-                  {result.provider.name} · {result.tokens} tok · {(result.durationMs / 1000).toFixed(1)}s
-                </Badge>
+                {isAdmin ? (
+                  <Badge variant="secondary" className="ml-auto text-[10px]">
+                    {result.provider.name} · {result.tokens} tok · {(result.durationMs / 1000).toFixed(1)}s
+                  </Badge>
+                ) : null}
               </div>
 
               {result.affectedCount > 0 ? (

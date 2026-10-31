@@ -80,7 +80,9 @@ export function createChatSseResponse(p: ChatSseParams): Response {
         for await (const event of completeStream(
           p.messages,
           'general',
-          { temperature: 0.7, maxTokens: 4000, reasoning: true, signal: abort.signal },
+          // Deep reasoning only when the person is purely chatting; in auto
+          // mode a hidden reasoning pass just delays the answer or the build.
+          { temperature: 0.7, maxTokens: 4000, reasoning: !p.allowBuildHandoff, signal: abort.signal },
           (p.providerKey as never) ?? null,
         )) {
           if (event.type === 'thinking') {

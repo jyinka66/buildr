@@ -4,6 +4,7 @@
 // provider selection and toast-free status flags. Server state (projects,
 // files, generations) is fetched via the api client and cached here.
 
+import { classifyIntent } from '@/lib/chat-intent'
 import { create } from 'zustand'
 import { api, type CreateProjectInput, type SessionInfo } from '@/lib/api-client'
 import { streamChat } from '@/lib/chat-client'
@@ -677,7 +678,9 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     if (!project) return
 
     // Build mode is the original behaviour, untouched.
-    if (get().chatMode === 'build') {
+    // Clear build commands go straight to the builder: no extra "should I
+    // build?" model call, which is what made these requests slow.
+    if (get().chatMode === 'build' || (get().chatMode === 'auto' && classifyIntent(message) === 'build')) {
       await get().generate(message)
       return
     }

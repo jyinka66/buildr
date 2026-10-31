@@ -89,6 +89,7 @@ function AssistantNode({
   rewindingId: string | null
   onRewind: (gen: GenerationView) => void
 }) {
+  const isAdmin = useBuilder((s) => !!s.session?.user.isAdmin)
   const isRewinding = rewindingId === gen.id
   const fileCount = gen.fileOps.length
   return (
@@ -110,7 +111,7 @@ function AssistantNode({
           <span className="text-[11px] text-muted-foreground">
             {formatRelative(gen.createdAt)}
           </span>
-          {gen.tokens > 0 ? (
+          {isAdmin && gen.tokens > 0 ? (
             <Badge
               variant="secondary"
               className="ml-auto gap-1 px-1.5 py-0 text-[10px] font-normal text-muted-foreground"

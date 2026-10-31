@@ -12,7 +12,7 @@
 // Nothing here touches project data or builds code.
 
 import * as React from 'react'
-import ReactMarkdown from 'react-markdown'
+import { Markdown, CopyButton, formatTranscript } from '@/components/builder/markdown'
 import {
   AlertTriangle,
   Bot,
@@ -442,6 +442,9 @@ export default function AiChatView() {
           <h1 className="text-sm font-semibold">AI Chat</h1>
           <span className="hidden text-xs text-muted-foreground sm:inline">Ask anything, plan, think it through</span>
           <div className="ml-auto flex items-center gap-1">
+            {messages.some((m) => m.content) ? (
+              <CopyButton text={formatTranscript(messages)} label="Copy conversation" iconOnly={false} className="h-8 px-2.5 text-xs" />
+            ) : null}
             {showHistory ? (
               <Button
                 variant="ghost"
@@ -544,14 +547,17 @@ export default function AiChatView() {
                         {isUser ? (
                           <p className="whitespace-pre-wrap break-words">{m.content}</p>
                         ) : (
-                          <div className="prose prose-sm dark:prose-invert max-w-none break-words [&>pre]:rounded-md [&>pre]:bg-zinc-950 [&>pre]:p-3 [&_code]:text-xs">
-                            <ReactMarkdown>{m.content}</ReactMarkdown>
+                          <div>
+                            <Markdown>{m.content}</Markdown>
                             {streaming && isLast ? (
                               <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-emerald-500 align-middle" />
                             ) : null}
                           </div>
                         )}
                       </div>
+                    ) : null}
+                    {m.content && !(streaming && isLast) ? (
+                      <CopyButton text={m.content} label="Copy message" iconOnly={false} className="-ml-1.5 self-start" />
                     ) : null}
                   </div>
                   {isUser ? (

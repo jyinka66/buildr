@@ -159,6 +159,7 @@ export function NewProjectDialog({
   const seedRef = React.useRef({ name: initialName, prompt: initialPrompt })
   seedRef.current = { name: initialName, prompt: initialPrompt }
   const providers = useBuilder((s) => s.providers)
+  const isAdmin = useBuilder((s) => !!s.session?.user.isAdmin)
   const integrations = useBuilder((s) => s.integrations)
   const createProject = useBuilder((s) => s.createProject)
 
@@ -443,6 +444,7 @@ export function NewProjectDialog({
               </Field>
 
               {/* Provider routing --------------------------------------- */}
+              {isAdmin ? (
               <Field label="Model provider">
                 <Select
                   value={providerKey}
@@ -481,6 +483,7 @@ export function NewProjectDialog({
                   </SelectContent>
                 </Select>
               </Field>
+              ) : null}
             </div>
           </ScrollArea>
 

@@ -35,6 +35,7 @@ const healthLabel: Record<'healthy' | 'degraded' | 'down', string> = {
 export function ProviderSwitcher() {
   const providers = useBuilder((s) => s.providers)
   const activeProviderKey = useBuilder((s) => s.activeProviderKey)
+  const isAdmin = useBuilder((s) => !!s.session?.user.isAdmin)
   const setActiveProvider = useBuilder((s) => s.setActiveProvider)
 
   const activeProvider = providers.find((p) => p.key === activeProviderKey) ?? null
@@ -46,6 +47,8 @@ export function ProviderSwitcher() {
   const triggerDotClass = activeProvider
     ? healthDotClass[activeProvider.health]
     : 'bg-emerald-500'
+
+  if (!isAdmin) return null
 
   return (
     <DropdownMenu>
