@@ -111,3 +111,10 @@ test('summaries and messages', () => {
   assert.match(msg, /Needs a look/)
   assert.match(msg, /continue building/)
 })
+
+test('unguarded fetch + map is flagged, guarded is not', () => {
+  const bad = checkProject([{ path: 'src/components/A.tsx', content: "'use client'\nimport { useEffect, useState } from 'react'\nexport function A(){ const [s,setS]=useState([]); useEffect(()=>{ fetch('/api/services').then(r=>r.json()).then(setS)},[]); return s.map(x=>x) }" }], 'nextjs')
+  assert.match(bad.map((i) => i.message).join(), /Array\.isArray/)
+  const good = checkProject([{ path: 'src/components/A.tsx', content: "'use client'\nimport { useEffect, useState } from 'react'\nexport function A(){ const [s,setS]=useState([]); useEffect(()=>{ fetch('/api/services').then(r=>r.json()).then(j=>setS(Array.isArray(j)?j:[]))},[]); return s.map(x=>x) }" }], 'nextjs')
+  assert.deepEqual(good, [])
+})

@@ -293,6 +293,15 @@ export function checkProject(files: ProjectFileLike[], stack: string): QualityIs
       }
     }
 
+    // Data loaded from the app's own API must never crash the screen when the
+    // response is not a list (preview, empty database, failed request).
+    if (/\bfetch\(\s*[`'"]\/api\//.test(f.content) && /\.map\(/.test(f.content) && !/Array\.isArray\(/.test(f.content)) {
+      issues.push({
+        path: f.path,
+        message: 'Fetches from /api and renders a list with .map() without checking Array.isArray(data). Guard the response and fall back to built-in sample data so the screen never crashes or stays empty.',
+      })
+    }
+
     for (const spec of importSpecifiers(f.content)) {
       if (spec.startsWith('.')) {
         const target = normalize(`${dirOf(f.path)}/${spec}`)

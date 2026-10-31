@@ -189,15 +189,20 @@ const RUNTIME_JS = `
   // CSP below blocks network connections; this wrapper returns deterministic
   // mock responses for relative API calls so UI states can still be previewed.
   (function installPreviewFetch(){
-    window.fetch = function(input){
+    window.fetch = function(input, init){
       var url = typeof input === 'string' ? input : (input && input.url) || '';
       if (url.indexOf('/api/') === 0 || url === '/api') {
-        return Promise.resolve(new Response(JSON.stringify({
-          data: [],
-          preview: true,
-          error: 'preview_only',
-          message: 'API calls are mocked in Buildr preview.'
-        }), { status: 200, headers: { 'content-type': 'application/json' } }));
+        var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+        var isRead = method === 'GET' || method === 'HEAD';
+        // Reads answer with an empty LIST that also carries the usual wrapper keys
+        // (data, items, results...), so generated code like setItems(await res.json())
+        // or json.data.map(...) keeps working. Writes answer with a success object.
+        var body = isRead
+          ? Object.assign([], { data: [], items: [], results: [], rows: [], preview: true })
+          : { ok: true, success: true, preview: true, data: {} };
+        var res = new Response(isRead ? '[]' : JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+        res.json = function(){ return Promise.resolve(body); };
+        return Promise.resolve(res);
       }
       return Promise.reject(new Error('Network access is disabled in Buildr preview.'));
     };

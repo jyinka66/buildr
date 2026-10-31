@@ -5,6 +5,7 @@
 // files, generations) is fetched via the api client and cached here.
 
 import { classifyIntent } from '@/lib/chat-intent'
+import { streamBuild } from '@/lib/build-client'
 import { create } from 'zustand'
 import { api, type CreateProjectInput, type SessionInfo } from '@/lib/api-client'
 import { streamChat } from '@/lib/chat-client'
@@ -45,6 +46,8 @@ interface BuilderState {
   activeProviderKey: string | null
   generating: boolean
   generatingError: string | null
+  // Live progress text while a new project is being built (null otherwise).
+  buildStatus: string | null
   chatMode: ChatMode
   // True while a conversational (not build) reply is streaming; Stop applies.
   chatStreaming: boolean
@@ -103,6 +106,7 @@ interface BuilderState {
   logout: () => Promise<void>
   createProject: (input: CreateProjectInput) => Promise<{ project: ProjectView | null; error?: string }>
   deleteProject: (id: string) => Promise<void>
+  runFirstBuild: (projectId: string, providerKey: string | null) => Promise<void>
   closeProject: () => void
   selectFile: (path: string | null) => void
   setBuilderTab: (tab: 'code' | 'preview' | 'integrations') => void
@@ -174,6 +178,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   activeProviderKey: null,
   generating: false,
   generatingError: null,
+  buildStatus: null,
   chatMode: 'auto',
   chatStreaming: false,
   bootError: null,
@@ -515,14 +520,34 @@ export const useBuilder = create<BuilderState>((set, get) => ({
 
   async createProject(input) {
     try {
-      const { project, error } = await api.createProject(input)
+      // Create the draft first and go straight to the builder; the first build
+      // then runs with live progress instead of a long blank wait.
+      const wantsBuild = input.generate !== false
+      const { project, error } = await api.createProject({ ...input, generate: false })
       if (!project) return { project: null, error: error || 'create_failed' }
       await get().refreshProjects()
       await get().openBuilder(project.id)
+      if (wantsBuild) void get().runFirstBuild(project.id, input.providerKey ?? null)
       return { project }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'create_failed'
       return { project: null, error: message }
+    }
+  },
+
+  async runFirstBuild(projectId, providerKey) {
+    set({ generating: true, generatingError: null, buildStatus: 'Starting…' })
+    try {
+      await streamBuild(projectId, { providerKey }, (message) => set({ buildStatus: message }))
+    } catch (err) {
+      set({ generatingError: err instanceof Error ? err.message : 'build_failed' })
+    } finally {
+      set({ generating: false, buildStatus: null })
+      // Only reload if the person is still looking at this project.
+      if (get().currentProject?.id === projectId) {
+        await get().openBuilder(projectId).catch(() => undefined)
+      }
+      await get().refreshProjects().catch(() => undefined)
     }
   },
 

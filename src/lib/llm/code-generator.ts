@@ -238,6 +238,8 @@ export function buildSystemPrompt(ctx: GenContext): string {
     '- Clean structure: small focused components, one responsibility per file, shared types in one place, no duplicated logic.',
     '- Strict TypeScript: no "any", explicit prop and return types, handle null/undefined.',
     '- Every screen handles loading, empty, and error states with clear user-facing wording.',
+    '- Client components that load data from the app\'s own /api routes must guard the response: use Array.isArray(data) before .map(), catch failed requests, and fall back to a small built-in SAMPLE list so the screen still works and looks real when the API is unavailable (the live preview has no backend).',
+    '- Never assume a fetch response shape. Normalise it once (const list = Array.isArray(json) ? json : json?.data ?? []) and use list everywhere.',
     '- Forms validate input, show inline errors, and disable submit while sending.',
     '- Accessible and responsive: semantic HTML, labels on inputs, visible focus, works at phone width first.',
     '- Consistent, polished UI: one spacing scale, one color palette, real sample content (never "Lorem ipsum").',
@@ -265,6 +267,8 @@ export interface InitialGenerationInput {
   dbConfig: DbConfig
   overrideProvider?: ProviderKey | null
   maxTokens?: number
+  // Progress for the builder UI (planning, building step n, checking...).
+  onStatus?: (message: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -496,6 +500,7 @@ export async function generateInitialProject(
     baseFiles: [...scaffold, ...integrationFiles],
     overrideProvider: overrideProvider ?? null,
     maxTokens: input.maxTokens,
+    onStatus: input.onStatus,
   })
   const llmFiles = built.files
   const result = { provider: built.provider, tokens: built.tokens, durationMs: built.durationMs }

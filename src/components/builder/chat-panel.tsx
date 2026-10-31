@@ -170,6 +170,7 @@ export function ChatPanel({ onSend }: ChatPanelProps) {
   const generations = useBuilder((s) => s.generations)
   const generating = useBuilder((s) => s.generating)
   const generatingError = useBuilder((s) => s.generatingError)
+  const buildStatus = useBuilder((s) => s.buildStatus)
   const providers = useBuilder((s) => s.providers)
   const converse = useBuilder((s) => s.converse)
   const chatMode = useBuilder((s) => s.chatMode)
@@ -258,7 +259,7 @@ export function ChatPanel({ onSend }: ChatPanelProps) {
                     <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.2s]" />
                     <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.1s]" />
                     <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500" />
-                    <span className="ml-1">thinking…</span>
+                    <span className="ml-1">{buildStatus ?? 'thinking…'}</span>
                   </span>
                 </motion.div>
               ) : null}
