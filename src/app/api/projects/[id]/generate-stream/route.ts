@@ -6,10 +6,10 @@
 // the DB, and a final "complete" event is sent with fileOps + files.
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { completeStream, type ChatMessage } from '@/lib/llm/router'
-import { buildSystemPrompt } from '@/lib/llm/code-generator'
+import { complete, completeStream, type ChatMessage } from '@/lib/llm/router'
+import { buildSystemPrompt, describeChanges, extractFilesFromText } from '@/lib/llm/code-generator'
 import { buildEditPrompt } from '@/lib/llm/project-context'
-import { extractFilesFromText, guessLanguage } from '@/lib/llm/code-generator'
+import { buildFixPrompt, checkProject, shipReadyFiles } from '@/lib/llm/build-quality'
 import { parseDbConfig, parseIntegrations } from '@/lib/helpers'
 import { requireSessionUser } from '@/lib/session'
 import { rateLimit } from '@/lib/rate-limit'
@@ -19,6 +19,7 @@ import { publicErrorMessage } from '@/lib/llm/public-error'
 import type { StackKey, StylingKey, FileOp } from '@/lib/types'
 
 export const runtime = 'nodejs'
+export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 interface ProjectFileRow {
@@ -226,6 +227,65 @@ export async function POST(
           fileOps.push({ path: f.path, action: exists ? 'update' : 'create', language: f.language })
         }
 
+        // Check the whole project once; fix problems in the files this turn touched.
+        let fixedIssues = 0
+        let remaining: { path: string; message: string }[] = []
+        if (llmFiles.length > 0) {
+          send({ type: 'status', message: 'Checking the code…' })
+          try {
+            const { data: allRows } = await db
+              .from('project_files')
+              .select('path, content, language')
+              .eq('project_id', id)
+            const touched = new Set(fileOps.map((o) => o.path))
+            let project_ = (allRows ?? []).map((r) => ({ path: r.path as string, content: r.content as string, language: r.language as string }))
+            const relevant = (list: { path: string; message: string }[]) => list.filter((i) => touched.has(i.path))
+            let issues = relevant(checkProject(project_, stack))
+            if (issues.length > 0) {
+              send({ type: 'status', message: `Fixing ${issues.length} problem${issues.length === 1 ? '' : 's'}…` })
+              const fixResult = await complete(
+                [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: buildFixPrompt(issues, project_) },
+                ],
+                'code',
+                { temperature: 0.2, maxTokens: 8000 },
+                (body.providerKey as never) ?? null,
+              )
+              totalTokens += fixResult.tokens
+              const fixes = extractFilesFromText(fixResult.content)
+              for (const f of fixes) {
+                const { error: fixErr } = await db.from('project_files').upsert(
+                  { project_id: id, path: f.path, content: f.content, language: f.language, generated: true, updated_at: new Date().toISOString() },
+                  { onConflict: 'project_id,path' },
+                )
+                if (fixErr) continue
+                if (!fileOps.some((o) => o.path === f.path)) fileOps.push({ path: f.path, action: 'create', language: f.language })
+                const idx = project_.findIndex((p_) => p_.path === f.path)
+                if (idx >= 0) project_[idx] = { ...project_[idx], content: f.content }
+                else project_ = [...project_, { path: f.path, content: f.content, language: f.language }]
+              }
+              const after = relevant(checkProject(project_, stack))
+              fixedIssues = Math.max(0, issues.length - after.length)
+              issues = after
+            }
+            remaining = issues
+            // Keep the production basics present (never overwrites existing files).
+            const extras = shipReadyFiles(project_, { name: project.name ?? 'app', stack, plan: null, integrations })
+            for (const f of extras) {
+              if (project_.some((p_) => p_.path === f.path)) {
+                if (f.path !== '.env.example') continue
+              }
+              await db.from('project_files').upsert(
+                { project_id: id, path: f.path, content: f.content, language: f.language ?? 'text', generated: true, updated_at: new Date().toISOString() },
+                { onConflict: 'project_id,path' },
+              )
+            }
+          } catch {
+            /* checking is best-effort; the applied changes stay */
+          }
+        }
+
         // Track token usage.
         if (totalTokens > 0) {
           const usageRecorded = await trackUsage(user.id, 'llm_tokens', totalTokens, {
@@ -240,7 +300,11 @@ export async function POST(
 
         const assistantMessage =
           llmFiles.length > 0
-            ? `Applied ${llmFiles.length} file change${llmFiles.length === 1 ? '' : 's'}: ${fileOps.map((o) => o.path).join(', ')}.`
+            ? describeChanges(fileOps) +
+              (fixedIssues > 0 ? `\n\nI checked the code and fixed ${fixedIssues} problem${fixedIssues === 1 ? '' : 's'} automatically.` : '') +
+              (remaining.length > 0
+                ? `\n\n**Needs a look:**\n${remaining.slice(0, 5).map((i) => `- \`${i.path}\`: ${i.message}`).join('\n')}`
+                : '')
             : `I couldn't parse structured file changes from the model response. Try rephrasing, e.g. "Add a login page" or "Create an API route at /api/users".`
 
         // Record the assistant generation.

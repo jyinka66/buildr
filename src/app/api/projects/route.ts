@@ -18,6 +18,8 @@ import { requireSessionUser } from '@/lib/session'
 import { checkLimit, releaseUsageReservation, trackUsage } from '@/lib/billing'
 import type { DbConfig } from '@/lib/types'
 
+export const maxDuration = 300
+
 export async function GET() {
   try {
     const user = await requireSessionUser()

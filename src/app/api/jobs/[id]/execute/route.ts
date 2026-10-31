@@ -11,6 +11,8 @@ import { trackUsage } from '@/lib/billing'
 import { rateLimit, rateLimitedResponse } from '@/lib/rate-limit'
 import type { DbConfig, StackKey, StylingKey } from '@/lib/types'
 
+export const maxDuration = 300
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   let user

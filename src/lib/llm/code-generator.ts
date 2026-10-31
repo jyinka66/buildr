@@ -15,6 +15,18 @@ import { buildScaffold, type ScaffoldInput } from '@/lib/generator/templates'
 import { applyIntegrations } from '@/lib/generator/integrations'
 import { replaceProjectFiles } from '@/lib/project-files'
 import { buildEditPrompt } from '@/lib/llm/project-context'
+import {
+  batchPlanFiles,
+  buildBatchPrompt,
+  buildFixPrompt,
+  buildPlanPrompt,
+  checkProject,
+  describeBuildResult,
+  parsePlan,
+  shipReadyFiles,
+  type BuildPlan,
+  type QualityIssue,
+} from '@/lib/llm/build-quality'
 import type {
   DbConfig,
   FileOp,
@@ -255,6 +267,191 @@ export interface InitialGenerationInput {
   maxTokens?: number
 }
 
+// ---------------------------------------------------------------------------
+// Production build pipeline: plan -> build in batches -> check -> auto-fix.
+// Falls back to the original single-call build if planning fails, so it is
+// never worse than before.
+// ---------------------------------------------------------------------------
+
+const BUILD_BUDGET_MS = 170_000
+const FIX_BUDGET_MS = 230_000
+
+interface PipelineInput {
+  systemPrompt: string
+  name: string
+  brief: string
+  stack: StackKey
+  styling: StylingKey
+  integrations: string[]
+  dbConfig: DbConfig
+  baseFiles: ExtractedFile[]
+  overrideProvider: ProviderKey | null
+  maxTokens?: number
+  onStatus?: (message: string) => void
+}
+
+interface PipelineResult {
+  files: ExtractedFile[]
+  plan: BuildPlan | null
+  provider: Awaited<ReturnType<typeof complete>>['provider']
+  tokens: number
+  durationMs: number
+  fixedIssues: number
+  remaining: QualityIssue[]
+  skipped: string[]
+}
+
+function mergeByPath(into: Map<string, ExtractedFile>, files: ExtractedFile[]): void {
+  for (const f of files) into.set(f.path, f)
+}
+
+export async function runBuildPipeline(input: PipelineInput): Promise<PipelineResult> {
+  const started = Date.now()
+  const maxTokens = Math.max(1, Math.min(8000, input.maxTokens ?? 8000))
+  let tokens = 0
+  let provider: PipelineResult['provider'] | null = null
+  const note = (r: Awaited<ReturnType<typeof complete>>) => {
+    tokens += r.tokens
+    provider = provider ?? r.provider
+  }
+  const call = async (user: string, task: 'code' | 'general', temperature: number, max: number, system = input.systemPrompt) => {
+    const r = await complete(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      task,
+      { temperature, maxTokens: max },
+      input.overrideProvider,
+    )
+    note(r)
+    return r
+  }
+
+  // 1. Plan.
+  let plan: BuildPlan | null = null
+  input.onStatus?.('Planning the app…')
+  try {
+    const r = await call(
+      buildPlanPrompt({
+        name: input.name,
+        brief: input.brief,
+        stack: input.stack,
+        styling: input.styling,
+        database: `${input.dbConfig.engine} via ${input.dbConfig.orm}`,
+        integrations: input.integrations,
+        existingPaths: input.baseFiles.map((f) => f.path),
+      }),
+      'general',
+      0.2,
+      2500,
+      'You are a senior software architect. You reply with a single JSON object and no other text.',
+    )
+    plan = parsePlan(r.content)
+  } catch (err) {
+    if (err instanceof Error && /No configured LLM providers/i.test(err.message)) throw err
+    plan = null
+  }
+
+  // 2. Build in batches.
+  const written = new Map<string, ExtractedFile>()
+  const skipped: string[] = []
+  if (plan) {
+    const batches = batchPlanFiles(plan.files)
+    for (let i = 0; i < batches.length; i++) {
+      if (Date.now() - started > BUILD_BUDGET_MS) {
+        skipped.push(...batches.slice(i).flat().map((f) => f.path))
+        break
+      }
+      input.onStatus?.(`Building step ${i + 1} of ${batches.length}…`)
+      try {
+        const r = await call(
+          buildBatchPrompt({
+            plan,
+            batch: batches[i],
+            written: Array.from(written.values()),
+            brief: input.brief,
+            batchIndex: i,
+            batchCount: batches.length,
+          }),
+          'code',
+          0.4,
+          maxTokens,
+        )
+        mergeByPath(written, extractFilesFromText(r.content))
+      } catch (err) {
+        if (err instanceof Error && /No configured LLM providers/i.test(err.message)) throw err
+        skipped.push(...batches.slice(i).flat().map((f) => f.path))
+        break
+      }
+    }
+  }
+
+  // Fallback: no plan, or nothing came back. One call, as before.
+  if (written.size === 0) {
+    input.onStatus?.('Building your app…')
+    const r = await call(
+      [
+        `Project name: ${input.name}`,
+        `Stack: ${input.stack} with ${input.styling}`,
+        `Database: ${input.dbConfig.engine} via ${input.dbConfig.orm}`,
+        `Integrations: ${input.integrations.join(', ') || 'none'}`,
+        '',
+        'Brief:',
+        input.brief,
+        '',
+        'Generate the application code now. Return ONLY the JSON file array.',
+      ].join('\n'),
+      'code',
+      0.4,
+      maxTokens,
+    )
+    mergeByPath(written, extractFilesFromText(r.content))
+    plan = null
+    skipped.length = 0
+  }
+
+  // 3. Check and auto-fix (one pass, within the time budget).
+  let fixedIssues = 0
+  let remaining: QualityIssue[] = []
+  if (written.size > 0) {
+    const project = () => {
+      const all = new Map<string, ExtractedFile>()
+      mergeByPath(all, input.baseFiles)
+      mergeByPath(all, Array.from(written.values()))
+      return Array.from(all.values())
+    }
+    input.onStatus?.('Checking the code…')
+    let issues = checkProject(project(), input.stack)
+    if (issues.length > 0 && Date.now() - started < FIX_BUDGET_MS) {
+      input.onStatus?.(`Fixing ${issues.length} problem${issues.length === 1 ? '' : 's'}…`)
+      try {
+        const r = await call(buildFixPrompt(issues, project()), 'code', 0.2, maxTokens)
+        const fixes = extractFilesFromText(r.content)
+        mergeByPath(written, fixes)
+        const after = checkProject(project(), input.stack)
+        fixedIssues = Math.max(0, issues.length - after.length)
+        issues = after
+      } catch {
+        /* keep the unfixed build; the issues are reported to the user */
+      }
+    }
+    remaining = issues
+  }
+
+  return {
+    files: Array.from(written.values()),
+    plan,
+    provider: provider as unknown as PipelineResult['provider'],
+    tokens,
+    durationMs: Date.now() - started,
+    fixedIssues,
+    remaining,
+    skipped,
+  }
+}
+
+
 export async function generateInitialProject(
   input: InitialGenerationInput,
 ): Promise<GenerationResult> {
@@ -287,36 +484,39 @@ export async function generateInitialProject(
     existingFiles: existing,
   })
 
-  const userPrompt = [
-    `Project name: ${input.name}`,
-    `Stack: ${stack} with ${styling}`,
-    `Database: ${dbConfig.engine} via ${dbConfig.orm}`,
-    `Integrations: ${integrations.join(', ') || 'none'}`,
-    '',
-    'Brief:',
-    prompt,
-    '',
-    'Generate the application code now. Return ONLY the JSON file array.',
-  ].join('\n')
-
-  const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: userPrompt },
-  ]
-
-  const result = await complete(messages, 'code', {
-    temperature: 0.4,
-    maxTokens: Math.max(1, Math.min(8000, input.maxTokens ?? 8000)),
-  }, overrideProvider ?? null)
-
-  // 4. Parse LLM files (tolerant: JSON array OR fenced code blocks).
-  const llmFiles = extractFilesFromText(result.content)
+  // 4. Plan -> build in batches -> check -> auto-fix (see build-quality.ts).
+  const built = await runBuildPipeline({
+    systemPrompt,
+    name: input.name,
+    brief: prompt,
+    stack,
+    styling,
+    integrations,
+    dbConfig,
+    baseFiles: [...scaffold, ...integrationFiles],
+    overrideProvider: overrideProvider ?? null,
+    maxTokens: input.maxTokens,
+  })
+  const llmFiles = built.files
+  const result = { provider: built.provider, tokens: built.tokens, durationMs: built.durationMs }
 
   // 5. Merge: scaffold first, then integrations, then LLM (LLM wins on path conflicts).
   const merged = new Map<string, { path: string; content: string; language: string }>()
   for (const f of scaffold) merged.set(f.path, f)
   for (const f of integrationFiles) merged.set(f.path, f)
   for (const f of llmFiles) merged.set(f.path, f)
+  // Production extras: README, .env.example, error/loading/404 pages, CI.
+  if (llmFiles.length > 0) {
+    const extras = shipReadyFiles(Array.from(merged.values()), {
+      name: input.name,
+      stack,
+      plan: built.plan,
+      integrations,
+    })
+    for (const f of extras) {
+      merged.set(f.path, { path: f.path, content: f.content, language: f.language ?? guessLanguage(f.path) })
+    }
+  }
 
   // 6. Persist all files to the DB + record the generation.
   // Replace the previous file tree with the new one.
@@ -342,7 +542,14 @@ export async function generateInitialProject(
 
   const assistantMessage =
     llmFiles.length > 0
-      ? describeInitialBuild(llmFiles.map((f) => f.path), files.length)
+      ? describeBuildResult({
+          plan: built.plan,
+          writtenPaths: llmFiles.map((f) => f.path),
+          total: files.length,
+          fixedIssues: built.fixedIssues,
+          remainingIssues: built.remaining,
+          skippedPaths: built.skipped,
+        })
       : `Scaffolded ${files.length} files for your ${stack} project. The AI code generation step didn't return structured files, so the base template is in place — describe what to build in chat to add features.`
 
   await db.from('generations').insert({
