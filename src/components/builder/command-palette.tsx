@@ -18,7 +18,7 @@ import {
   FolderOpen,
   History,
   Home,
-  LayoutDashboard,
+  MessageSquare,
   LogIn,
   LogOut,
   Plus,
@@ -98,18 +98,15 @@ export function CommandPalette() {
     [close, view, currentProject, selectFile, setBuilderTab, openBuilder],
   )
 
-  // "New project" — the create dialog lives in DashboardView's local state.
-  // Rather than touching the store, we navigate to the dashboard and let the
-  // user click the prominent "New project" button. We also dispatch a
-  // `buildr:new-project` custom event so a future listener can auto-open the
-  // dialog once the dashboard has mounted.
+  // "New project" — the create dialog lives in the chat view. Go there and
+  // ask it to open the dialog with a `buildr:new-project` event.
   const handleNewProject = React.useCallback(() => {
     close()
     openDashboard()
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('buildr:new-project'))
+      // Give the chat view a moment to mount before it is asked to open the dialog.
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent('buildr:new-project')), 250)
     }
-    toast('Click “New project” on the dashboard to create one.')
   }, [close, openDashboard])
 
   // Export current project as a ZIP via the backend export endpoint.
@@ -177,8 +174,8 @@ export function CommandPalette() {
               value="go to dashboard"
               onSelect={go(() => openDashboard())}
             >
-              <LayoutDashboard />
-              <span>Go to Dashboard</span>
+              <MessageSquare />
+              <span>Go to Chat</span>
             </CommandItem>
             <CommandItem
               value="go to settings"

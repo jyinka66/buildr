@@ -9,7 +9,6 @@ import { useBuilder, authMessage } from '@/lib/store'
 import { AppHeader, AppFooter } from '@/components/builder/app-shell'
 import { AppSidebar, AppTopBar } from '@/components/builder/app-sidebar'
 import { LandingView } from '@/components/builder/landing-view'
-import DashboardView from '@/components/builder/dashboard-view'
 import { BuilderWorkspace } from '@/components/builder/builder-workspace'
 import { SettingsView } from '@/components/builder/settings-view'
 import BusinessLaunchView from '@/components/builder/business-launch-view'
@@ -223,7 +222,6 @@ export default function Home() {
     }
     switch (view) {
       case 'landing': return <LandingView />
-      case 'dashboard': return <DashboardView />
       case 'chat': return <AiChatView />
       case 'builder': return <BuilderWorkspace />
       case 'settings': return <SettingsView />

@@ -2,7 +2,7 @@
 
 // Global app shell: header + footer. Renders auth-aware nav.
 // Logged-out: brand + "Sign in" / "Get started" CTAs.
-// Logged-in: Dashboard / Settings + user menu with sign out.
+// Logged-in: Chat / Settings + user menu with sign out.
 
 import {
   BarChart3,
@@ -12,7 +12,6 @@ import {
   Github,
   Globe,
   KeyRound,
-  LayoutDashboard,
   LogOut,
   Megaphone,
   Rocket,
@@ -83,15 +82,6 @@ export function AppHeader() {
 
         {session && (
           <nav className="ml-2 flex items-center gap-1">
-            <Button
-              variant={view === 'dashboard' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={openDashboard}
-              className="h-8 gap-1.5"
-            >
-              <LayoutDashboard className="h-4 w-4" />
-              <span className="hidden sm:inline">Dashboard</span>
-            </Button>
             <Button
               variant={view === 'business' ? 'secondary' : 'ghost'}
               size="sm"
@@ -223,9 +213,6 @@ export function AppHeader() {
                     {session.user.email}
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={openDashboard} className="gap-2">
-                    <LayoutDashboard className="h-4 w-4" /> Dashboard
-                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={openSettings} className="gap-2">
                     <Settings className="h-4 w-4" /> Settings
                   </DropdownMenuItem>
@@ -346,7 +333,7 @@ export function AppFooter() {
               <button onClick={openLanding} className="text-left text-xs text-muted-foreground hover:text-foreground">Home</button>
               {session && (
                 <>
-                  <button onClick={openDashboard} className="text-left text-xs text-muted-foreground hover:text-foreground">Dashboard</button>
+                  <button onClick={openDashboard} className="text-left text-xs text-muted-foreground hover:text-foreground">Chat</button>
                   <button onClick={openBusiness} className="text-left text-xs text-muted-foreground hover:text-foreground">Launch</button>
                   <button onClick={openBilling} className="text-left text-xs text-muted-foreground hover:text-foreground">Pricing</button>
                   <button onClick={openSettings} className="text-left text-xs text-muted-foreground hover:text-foreground">Settings</button>

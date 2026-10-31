@@ -2,7 +2,7 @@
 
 // Buildr — Left Sidebar Navigation.
 // ------------------------------------------------------------------
-// All standalone features (Dashboard, Launch, Jobs, God Mode, Marketing,
+// All standalone features (Chat, Launch, Jobs, God Mode, Marketing,
 // Support, Ops, Analytics, Settings) sit in a left sidebar, grouped by
 // category — NOT crammed into a top nav bar.
 //
@@ -11,7 +11,7 @@
 //   │ Logo + Brand              │
 //   │ ─────────────────────     │
 //   │ WORKSPACE                 │
-//   │   Dashboard               │
+//   │   Chat                    │
 //   │ ─────────────────────     │
 //   │ BUILD & LAUNCH            │
 //   │   Launch Business         │
@@ -47,7 +47,6 @@ import {
   Briefcase,
   CreditCard,
   KeyRound,
-  LayoutDashboard,
   LifeBuoy,
   MessageSquare,
   LogOut,
@@ -94,8 +93,7 @@ function useNavGroups() {
     {
       label: 'Workspace',
       items: [
-        { icon: LayoutDashboard, label: 'Dashboard', view: 'dashboard', action: s.openDashboard },
-        { icon: MessageSquare, label: 'AI Chat', view: 'chat', action: s.openChat },
+        { icon: MessageSquare, label: 'Chat', view: 'chat', action: s.openChat },
       ],
     },
     {

@@ -16,7 +16,7 @@ import type {
   ProviderConfig,
 } from '@/lib/types'
 
-export type View = 'landing' | 'dashboard' | 'builder' | 'settings' | 'business' | 'godmode' | 'billing' | 'marketing' | 'support' | 'ops' | 'notifications' | 'api-keys' | 'webhooks' | 'workspaces' | 'admin' | 'onboarding' | 'jobs' | 'analytics' | 'shared' | 'chat'
+export type View = 'landing' | 'builder' | 'settings' | 'business' | 'godmode' | 'billing' | 'marketing' | 'support' | 'ops' | 'notifications' | 'api-keys' | 'webhooks' | 'workspaces' | 'admin' | 'onboarding' | 'jobs' | 'analytics' | 'shared' | 'chat'
 export type AuthMode = 'login' | 'register' | 'forgot' | 'reset'
 // How the project chat treats a message: let the AI decide (auto), only talk
 // (chat), or always build (build — the original behaviour).
@@ -187,7 +187,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       set({ session, authReady: true })
       if (session) {
         // Admin redirect on boot.
-        set({ view: session.user.isAdmin ? 'admin' : 'dashboard', projectsLoading: true })
+        set({ view: session.user.isAdmin ? 'admin' : 'chat', projectsLoading: true })
         try {
           await get().refreshProjects()
           await get().refreshProviders()
@@ -229,7 +229,8 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       get().openAuth('login')
       return
     }
-    set({ view: 'dashboard', currentProject: null, files: [], generations: [] })
+    // The chat is the home screen; there is no separate dashboard page.
+    set({ view: 'chat', currentProject: null, files: [], generations: [] })
   },
 
   openChat() {
@@ -316,7 +317,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     if (session?.user.isAdmin) {
       set({ session, authOpen: false, authError: null, view: 'admin', currentProject: null, files: [], generations: [] })
     } else {
-      set({ session, authOpen: false, authError: null, view: 'dashboard', twoFactorRequired: false, twoFactorEmail: '', twoFactorPassword: '', currentProject: null, files: [], generations: [] })
+      set({ session, authOpen: false, authError: null, view: 'chat', twoFactorRequired: false, twoFactorEmail: '', twoFactorPassword: '', currentProject: null, files: [], generations: [] })
     }
     set({ projectsLoading: true })
     try { await get().refreshProjects(); await get().refreshProviders(); await get().refreshIntegrations() }
@@ -413,7 +414,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   openAdmin() {
     const session = get().session
     if (!session) { get().openAuth('login'); return }
-    if (session.user.isAdmin) set({ view: 'admin' }); else set({ view: 'dashboard' })
+    if (session.user.isAdmin) set({ view: 'admin' }); else set({ view: 'chat' })
   },
   openOnboarding() { set({ view: 'onboarding' }) },
 
@@ -504,12 +505,12 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     try {
       await fetch('/api/onboarding/complete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
     } catch { /* fail-open */ }
-    set({ onboardingRequired: false, view: 'dashboard' })
+    set({ onboardingRequired: false, view: 'chat' })
   },
 
   async skipOnboarding() {
     try { await fetch('/api/onboarding/skip', { method: 'POST' }) } catch { /* fail-open */ }
-    set({ onboardingRequired: false, view: 'dashboard' })
+    set({ onboardingRequired: false, view: 'chat' })
   },
 
   async createProject(input) {
