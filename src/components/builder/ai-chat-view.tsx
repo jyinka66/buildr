@@ -18,6 +18,7 @@ import {
   Bot,
   History,
   Download,
+  Link2,
   FolderKanban,
   FolderPlus,
   MessageSquare,
@@ -41,6 +42,8 @@ import {
   type ChatSummary,
 } from '@/lib/chats-client'
 import { buildProjectSeed, groupByRecency, type StoredChatMessage } from '@/lib/chat-history'
+import { toast } from 'sonner'
+import { api } from '@/lib/api-client'
 import { useBuilder } from '@/lib/store'
 import { NewProjectDialog } from '@/components/builder/new-project-dialog'
 import { ThinkingBlock } from '@/components/builder/thinking-block'
@@ -403,6 +406,32 @@ export default function AiChatView() {
       setDeleting(false)
     }
   }
+  // Public link: opt-in per project; enabling copies the link.
+  const [sharingId, setSharingId] = React.useState<string | null>(null)
+  const togglePublic = async (p: ProjectView) => {
+    if (sharingId) return
+    setSharingId(p.id)
+    try {
+      const result = await api.setProjectPublic(p.id, !p.isPublic)
+      useBuilder.setState((state) => ({
+        projects: state.projects.map((item) => (item.id === p.id ? { ...item, isPublic: result.isPublic } : item)),
+      }))
+      if (result.isPublic && result.shareUrl) {
+        try {
+          await navigator.clipboard.writeText(result.shareUrl)
+          toast.success('Public link copied')
+        } catch {
+          window.prompt('Copy your public project link', result.shareUrl)
+        }
+      } else if (!result.isPublic) {
+        toast.success('Public link disabled')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update the public link.')
+    } finally {
+      setSharingId(null)
+    }
+  }
   // Other parts of the app (command palette) can ask for the New project dialog.
   React.useEffect(() => {
     const open = () => setNewProjectOpen(true)
@@ -451,7 +480,7 @@ export default function AiChatView() {
                   <button
                     type="button"
                     onClick={() => void openBuilder(p.id)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 pr-14 text-left text-xs transition-colors hover:bg-muted"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 pr-20 text-left text-xs transition-colors hover:bg-muted"
                     title={p.name}
                   >
                     <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -461,6 +490,18 @@ export default function AiChatView() {
                     ) : null}
                   </button>
                   <div className="absolute top-1/2 right-1 flex -translate-y-1/2 gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className={cn('h-6 w-6', p.isPublic && 'text-emerald-600')}
+                      onClick={() => void togglePublic(p)}
+                      disabled={sharingId === p.id}
+                      aria-label={p.isPublic ? 'Disable public link' : 'Enable public link'}
+                      title={p.isPublic ? 'Disable public link' : 'Enable public link'}
+                    >
+                      <Link2 className="h-3 w-3" />
+                    </Button>
                     <Button
                       type="button"
                       variant="ghost"

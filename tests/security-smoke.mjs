@@ -166,11 +166,11 @@ test('token bucket retry time matches the next available token', () => {
 })
 
 
-test('public project visibility is owner-controlled and opt-in in the dashboard', () => {
+test('public project visibility is owner-controlled and opt-in in the chat sidebar', () => {
   const shareRoute = readFileSync(new URL('../src/app/api/projects/[id]/share/route.ts', import.meta.url), 'utf8')
   const projectList = readFileSync(new URL('../src/app/api/projects/route.ts', import.meta.url), 'utf8')
   const apiClient = readFileSync(new URL('../src/lib/api-client.ts', import.meta.url), 'utf8')
-  const dashboard = readFileSync(new URL('../src/components/builder/dashboard-view.tsx', import.meta.url), 'utf8')
+  const dashboard = readFileSync(new URL('../src/components/builder/ai-chat-view.tsx', import.meta.url), 'utf8')
   const publicRoute = readFileSync(new URL('../src/app/api/shared/[slug]/route.ts', import.meta.url), 'utf8')
   assert.ok(shareRoute.includes('project.owner_id !== user.id'), 'only project owners may change sharing')
   assert.ok(shareRoute.includes('.eq(\'owner_id\', user.id)'), 'update must be scoped to the authenticated owner')
@@ -178,7 +178,7 @@ test('public project visibility is owner-controlled and opt-in in the dashboard'
   assert.ok(shareRoute.includes('typeof body.enable !== \'boolean\''), 'public sharing must require an explicit boolean opt-in or opt-out')
   assert.ok(projectList.includes('isPublic: r.is_public === true'), 'owner project list must expose sharing state')
   assert.ok(apiClient.includes('setProjectPublic'), 'frontend must call the owner-protected sharing endpoint')
-  assert.ok(dashboard.includes('Enable public link') && dashboard.includes('Disable public link'), 'dashboard must expose an explicit visibility toggle')
+  assert.ok(dashboard.includes('Enable public link') && dashboard.includes('Disable public link'), 'the project list must expose an explicit visibility toggle')
   assert.ok(publicRoute.includes(".eq('is_public', true)"), 'public endpoint must only serve projects currently opted into sharing')
 })
 
