@@ -1,21 +1,24 @@
-// GET  /api/providers       — list providers (no secrets returned) [any authenticated user]
-// POST /api/providers       — upsert a provider config [ADMIN ONLY]
-// PATCH /api/providers/[key] — update enabled/health/key [ADMIN ONLY]
+// GET  /api/providers       — list providers (keys masked) [ADMIN ONLY; other users get an empty list]
+// POST /api/providers       — update a provider config [ADMIN ONLY]
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { loadProviders, seedProviders } from '@/lib/llm/router'
-import { requireAdmin } from '@/lib/admin'
+import { isUserAdmin, requireAdmin } from '@/lib/admin'
 import { requireSessionUser } from '@/lib/session'
 
 export async function GET() {
+  let user
   try {
-    await requireSessionUser()
+    user = await requireSessionUser()
   } catch (err) {
     if ((err as { status?: number }).status === 401) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
     }
     throw err
   }
+  // Which AI models and providers the platform uses is internal. Regular users get an empty
+  // list (not an error, so the app keeps working); only admins see the configuration.
+  if (!(await isUserAdmin(user.id))) return NextResponse.json({ providers: [] })
   await seedProviders()
   const providers = await loadProviders()
   // Mask API keys.

@@ -14,6 +14,8 @@ import { parseDbConfig, parseIntegrations } from '@/lib/helpers'
 import { requireSessionUser } from '@/lib/session'
 import { rateLimit } from '@/lib/rate-limit'
 import { checkLimit, releaseUsageReservation, trackUsage } from '@/lib/billing'
+import { isUserAdmin } from '@/lib/admin'
+import { publicErrorMessage } from '@/lib/llm/public-error'
 import type { StackKey, StylingKey, FileOp } from '@/lib/types'
 
 export const runtime = 'nodejs'
@@ -152,6 +154,9 @@ export async function POST(
     { role: 'user', content: userPrompt },
   ]
 
+  // Provider and model names are shown to admins only.
+  const exposeProvider = await isUserAdmin(user.id)
+
   // ---- SSE stream ----
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -266,7 +271,7 @@ export async function POST(
           type: 'complete',
           message: assistantMessage,
           fileOps,
-          provider: providerInfo,
+          provider: exposeProvider ? providerInfo : null,
           tokens: totalTokens,
           durationMs,
           files: (updatedFiles ?? []).map((f: ProjectFileRow) => ({
@@ -280,7 +285,7 @@ export async function POST(
         })
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'stream_failed'
-        send({ type: 'error', message: msg })
+        send({ type: 'error', message: publicErrorMessage(msg, exposeProvider) })
       } finally {
         // Always clear a reservation left behind by a failed/aborted stream.
         await releaseUsageReservation(user.id, limit.reservationId)

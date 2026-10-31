@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { requireSessionUser } from '@/lib/session'
 import { rateLimit } from '@/lib/rate-limit'
 import { checkLimit, releaseUsageReservation } from '@/lib/billing'
+import { isUserAdmin } from '@/lib/admin'
 import { buildChatSystemPrompt } from '@/lib/llm/chat-prompts'
 import { createChatSseResponse, jsonError } from '@/lib/llm/chat-sse'
 import { CHAT_CONTEXT_LIMITS, formatProjectContext, selectProjectContext } from '@/lib/llm/project-context'
@@ -125,6 +126,7 @@ export async function POST(
     reservationId: limit.reservationId,
     projectId: id,
     allowBuildHandoff,
+    exposeProvider: await isUserAdmin(user.id),
     // Record the user's turn only once we know this is a chat reply. On a
     // build handoff the builder records it itself, so it is never duplicated.
     onChatStarted: async () => {

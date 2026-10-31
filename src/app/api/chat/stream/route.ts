@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server'
 import { requireSessionUser } from '@/lib/session'
 import { rateLimit } from '@/lib/rate-limit'
 import { checkLimit } from '@/lib/billing'
+import { isUserAdmin } from '@/lib/admin'
 import { buildChatSystemPrompt } from '@/lib/llm/chat-prompts'
 import { createChatSseResponse, jsonError } from '@/lib/llm/chat-sse'
 import type { ChatMessage } from '@/lib/llm/router'
@@ -82,5 +83,6 @@ export async function POST(req: NextRequest) {
     providerKey,
     reservationId: limit.reservationId,
     allowBuildHandoff: false,
+    exposeProvider: await isUserAdmin(user.id),
   })
 }

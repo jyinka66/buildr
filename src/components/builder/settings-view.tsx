@@ -2,13 +2,12 @@
 
 // Settings View (Module 1 + Module 4 configuration UI)
 // ------------------------------------------------------------------
-// Two stacked sections in a single scrollable, centered column:
-//   A) LLM Providers — Multi-LLM Router configuration. Each provider
-//      card exposes weight, enabled, API key, model and baseUrl controls.
-//      All mutations route through `api.updateProvider` and are then
-//      reflected back via `useBuilder.refreshProviders`.
-//   B) Integration Marketplace — read-only catalogue (marketplace mode).
-//      Per-project toggles live in the builder workspace, not here.
+// One scrollable, centered column. For every user: Account (name, password),
+// Security (two-factor), Data and privacy (export, delete), Integration
+// Marketplace (read-only catalogue; per-project toggles live in the builder).
+// Admins only, at the bottom: AI providers — the Multi-LLM Router configuration
+// (weight, enabled, API key, model, baseUrl). Regular users never see model or
+// provider names, and /api/providers returns nothing to them.
 //
 // Design constraints honoured:
 //   - Mobile-first, max-w-5xl centered.
@@ -59,6 +58,7 @@ import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { IntegrationMarketplace } from '@/components/builder/integration-marketplace'
 import { TwoFactorCard } from '@/components/builder/security-settings'
+import { DataPrivacyCard, PasswordCard, ProfileCard } from '@/components/builder/account-settings'
 
 type ProviderRow = ProviderConfig & { hasKey: boolean }
 
@@ -428,13 +428,15 @@ function ProviderCard({ provider, onSaved }: ProviderCardProps) {
 // ---------------------------------------------------------------------------
 
 export function SettingsView() {
+  const isAdmin = useBuilder((s) => !!s.session?.user.isAdmin)
   const providers = useBuilder((s) => s.providers)
   const refreshProviders = useBuilder((s) => s.refreshProviders)
   const refreshIntegrations = useBuilder((s) => s.refreshIntegrations)
 
+  // Provider configuration is admin-only. Regular users never load or see it.
   useEffect(() => {
-    if (providers.length === 0) void refreshProviders()
-  }, [providers.length, refreshProviders])
+    if (isAdmin && providers.length === 0) void refreshProviders()
+  }, [isAdmin, providers.length, refreshProviders])
 
   useEffect(() => {
     void refreshIntegrations()
@@ -442,83 +444,26 @@ export function SettingsView() {
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 md:px-6 [scrollbar-width:thin]">
+      <header className="mb-8 space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <p className="text-sm text-muted-foreground">Manage your account, security and data.</p>
+      </header>
+
       {/* ----------------------------------------------------------------- */}
-      {/* Section A — LLM Providers                                          */}
+      {/* Account                                                            */}
       {/* ----------------------------------------------------------------- */}
       <section className="space-y-5">
-        <header className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="grid h-8 w-8 place-items-center rounded-md bg-emerald-600 text-white">
-              <Zap className="h-4 w-4" />
-            </span>
-            <h2 className="text-xl font-semibold tracking-tight">
-              LLM Providers
-            </h2>
-          </div>
-          <p className="max-w-3xl text-sm text-muted-foreground">
-            Buildr routes every generation by task speciality, with weighted
-            load balancing, automatic failover and BYO-key support. The
-            built-in <span className="font-medium text-foreground">Z.ai</span>{' '}
-            provider runs out of the box — add your own keys to unlock
-            Anthropic, OpenAI, Gemini, DeepSeek and local Ollama.
-          </p>
-        </header>
-
-        <Card className="bg-muted/30 py-0">
-          <CardContent className="grid grid-cols-1 gap-3 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
-            {ROUTER_FEATURES.map((f) => (
-              <div
-                key={f.label}
-                className="flex items-start gap-2.5 rounded-md border bg-background/60 p-3"
-              >
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-                  <f.icon className="h-3.5 w-3.5" />
-                </span>
-                <div className="min-w-0">
-                  <div className="text-xs font-medium">{f.label}</div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {f.hint}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        {providers.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed py-12 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading providers...
-          </div>
-        ) : (
-          <motion.div
-            initial="hidden"
-            animate="show"
-            variants={{
-              hidden: {},
-              show: { transition: { staggerChildren: 0.05 } },
-            }}
-            className="grid grid-cols-1 gap-4 lg:grid-cols-2"
-          >
-            {providers.map((provider) => (
-              <motion.div
-                key={provider.id}
-                variants={{
-                  hidden: { opacity: 0, y: 8 },
-                  show: { opacity: 1, y: 0 },
-                }}
-              >
-                <ProviderCard provider={provider} onSaved={refreshProviders} />
-              </motion.div>
-            ))}
-          </motion.div>
-        )}
+        <h2 className="text-xl font-semibold tracking-tight">Account</h2>
+        <div className="grid grid-cols-1 gap-4">
+          <ProfileCard />
+          <PasswordCard />
+        </div>
       </section>
 
       <Separator className="my-10" />
 
       {/* ----------------------------------------------------------------- */}
-      {/* Section: Security (two-factor authentication)                      */}
+      {/* Security (two-factor authentication)                               */}
       {/* ----------------------------------------------------------------- */}
       <section className="space-y-5">
         <header className="space-y-2">
@@ -533,7 +478,17 @@ export function SettingsView() {
       <Separator className="my-10" />
 
       {/* ----------------------------------------------------------------- */}
-      {/* Section B — Integration Marketplace                                */}
+      {/* Data and privacy                                                   */}
+      {/* ----------------------------------------------------------------- */}
+      <section className="space-y-5">
+        <h2 className="text-xl font-semibold tracking-tight">Data and privacy</h2>
+        <DataPrivacyCard />
+      </section>
+
+      <Separator className="my-10" />
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Integration Marketplace                                            */}
       {/* ----------------------------------------------------------------- */}
       <section className="space-y-5">
         <header className="space-y-2">
@@ -557,6 +512,82 @@ export function SettingsView() {
 
         <IntegrationMarketplace mode="marketplace" />
       </section>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Admin only — AI providers. Never rendered for regular users.       */}
+      {/* ----------------------------------------------------------------- */}
+      {isAdmin ? (
+        <>
+          <Separator className="my-10" />
+          <section className="space-y-5">
+            <header className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="grid h-8 w-8 place-items-center rounded-md bg-emerald-600 text-white">
+                  <Zap className="h-4 w-4" />
+                </span>
+                <h2 className="text-xl font-semibold tracking-tight">AI providers</h2>
+                <Badge variant="outline">Admin only</Badge>
+              </div>
+              <p className="max-w-3xl text-sm text-muted-foreground">
+                Which AI models power Buildr, and in what order. Only admins can see and change this; regular
+                users never see model or provider names. Buildr routes every request by task speciality, with
+                weighted load balancing and automatic failover. Add keys to enable Anthropic, OpenAI, Gemini,
+                DeepSeek, Groq, OpenRouter and local Ollama.
+              </p>
+            </header>
+
+            <Card className="bg-muted/30 py-0">
+              <CardContent className="grid grid-cols-1 gap-3 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
+                {ROUTER_FEATURES.map((f) => (
+                  <div
+                    key={f.label}
+                    className="flex items-start gap-2.5 rounded-md border bg-background/60 p-3"
+                  >
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                      <f.icon className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium">{f.label}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {f.hint}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            {providers.length === 0 ? (
+              <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed py-12 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading providers...
+              </div>
+            ) : (
+              <motion.div
+                initial="hidden"
+                animate="show"
+                variants={{
+                  hidden: {},
+                  show: { transition: { staggerChildren: 0.05 } },
+                }}
+                className="grid grid-cols-1 gap-4 lg:grid-cols-2"
+              >
+                {providers.map((provider) => (
+                  <motion.div
+                    key={provider.id}
+                    variants={{
+                      hidden: { opacity: 0, y: 8 },
+                      show: { opacity: 1, y: 0 },
+                    }}
+                  >
+                    <ProviderCard provider={provider} onSaved={refreshProviders} />
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
+          </section>
+        </>
+      ) : null}
     </div>
   )
 }

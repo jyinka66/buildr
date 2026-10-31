@@ -15,6 +15,7 @@
 import { completeStream, type ChatMessage } from '@/lib/llm/router'
 import { classifyReplyHead } from '@/lib/llm/chat-prompts'
 import { releaseUsageReservation, trackUsage } from '@/lib/billing'
+import { publicErrorMessage } from '@/lib/llm/public-error'
 
 export interface ChatSseParams {
   req: Request
@@ -25,6 +26,9 @@ export interface ChatSseParams {
   projectId?: string
   // Project chat only: let the model hand real build requests to the builder.
   allowBuildHandoff: boolean
+  // Include the provider and model name in the final event. Admins only: which AI
+  // models the platform uses is not shown to regular users.
+  exposeProvider?: boolean
   // Called once, as soon as the reply is known to be a normal chat answer
   // (not a build handoff). Project chat uses it to record the user's turn.
   onChatStarted?: () => Promise<void>
@@ -157,9 +161,9 @@ export function createChatSseResponse(p: ChatSseParams): Response {
           })
         }
 
-        send({ type: 'done', provider: providerInfo, tokens, durationMs, stopped })
+        send({ type: 'done', provider: p.exposeProvider ? providerInfo : null, tokens, durationMs, stopped })
       } catch (err) {
-        send({ type: 'error', message: err instanceof Error ? err.message : 'stream_failed' })
+        send({ type: 'error', message: publicErrorMessage(err instanceof Error ? err.message : 'stream_failed', !!p.exposeProvider) })
       } finally {
         // Always free the usage reservation so the next request (including the
         // build handoff) is not blocked by this one.

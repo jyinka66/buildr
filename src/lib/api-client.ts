@@ -324,6 +324,37 @@ export const api = {
     return json(res)
   },
 
+  async updateProfileName(name: string): Promise<{ ok: boolean; name: string }> {
+    const res = await fetch('/api/account/profile', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    return json(res)
+  },
+
+  async changePassword(body: {
+    currentPassword: string
+    newPassword: string
+    totpCode?: string
+  }): Promise<{ ok: boolean }> {
+    const res = await fetch('/api/account/password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return json(res)
+  },
+
+  async deleteAccount(body: { password: string; totpCode?: string; confirm: string }): Promise<{ ok: boolean }> {
+    const res = await fetch('/api/account/delete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return json(res)
+  },
+
   async signOut(): Promise<void> {
     const csrfToken = await getCsrfToken()
     await fetch('/api/auth/signout', {

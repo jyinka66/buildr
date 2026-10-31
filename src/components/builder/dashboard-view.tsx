@@ -104,6 +104,8 @@ export default function DashboardView() {
   const bootError = useBuilder((s) => s.bootError)
   const booted = useBuilder((s) => s.booted)
   const providers = useBuilder((s) => s.providers)
+  // Which AI providers are configured is internal; only admins see that card.
+  const isAdmin = useBuilder((s) => !!s.session?.user.isAdmin)
   const integrations = useBuilder((s) => s.integrations)
   const boot = useBuilder((s) => s.boot)
   const openBuilder = useBuilder((s) => s.openBuilder)
@@ -165,20 +167,22 @@ export default function DashboardView() {
       </section>
 
       {/* Stats ----------------------------------------------------------- */}
-      <section className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <section className={cn('mt-8 grid grid-cols-1 gap-3', isAdmin ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
         <StatCard
           icon={<FolderGit2 className="h-4 w-4" />}
           label="Projects"
           value={projects.length}
           loading={projectsLoading}
         />
-        <StatCard
-          icon={<Cpu className="h-4 w-4" />}
-          label="Providers enabled"
-          value={enabledProviders}
-          loading={projectsLoading}
-          hint={`${providers.length} configured`}
-        />
+        {isAdmin ? (
+          <StatCard
+            icon={<Cpu className="h-4 w-4" />}
+            label="Providers enabled"
+            value={enabledProviders}
+            loading={projectsLoading}
+            hint={`${providers.length} configured`}
+          />
+        ) : null}
         <StatCard
           icon={<Boxes className="h-4 w-4" />}
           label="Integrations available"

@@ -4,16 +4,24 @@ import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { requireSessionUser } from '@/lib/session'
 import { verifyCode } from '@/lib/totp'
+import { distributedRateLimit } from '@/lib/distributed-rate-limit'
+import { rateLimitedResponse } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
   try {
     const user = await requireSessionUser()
-    const { password, totpCode, confirm } = await req.json()
+    // The password check below must not be a free guessing oracle for a stolen session.
+    const rl = await distributedRateLimit(`acctdelete:${user.id}`, { limit: 8, windowMs: 600_000 })
+    if (!rl.ok) return rateLimitedResponse(rl.resetMs)
+    const body = (await req.json().catch(() => null)) as { password?: unknown; totpCode?: unknown; confirm?: unknown } | null
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: 'invalid_json_body' }, { status: 400 })
+    const { totpCode, confirm } = body
+    const password = typeof body.password === 'string' ? body.password : ''
     if (confirm !== 'DELETE') return NextResponse.json({ error: 'Type DELETE to confirm.' }, { status: 400 })
 
     const { data: u } = await db.from('users').select('password, totp_enabled, totp_secret, email').eq('id', user.id).maybeSingle()
     if (!u || !(await bcrypt.compare(password, u.password))) return NextResponse.json({ error: 'Incorrect password.' }, { status: 400 })
-    if (u.totp_enabled && (!totpCode || !u.totp_secret || !verifyCode(u.totp_secret, totpCode))) return NextResponse.json({ error: 'Invalid 2FA code.' }, { status: 400 })
+    if (u.totp_enabled && (typeof totpCode !== 'string' || !totpCode || !u.totp_secret || !verifyCode(u.totp_secret, totpCode))) return NextResponse.json({ error: 'Invalid 2FA code.' }, { status: 400 })
 
     // Delete first so a failed delete cannot leave a false audit event.
     const deletedAt = new Date().toISOString()
