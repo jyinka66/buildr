@@ -245,3 +245,11 @@ test('sign-in reports precise errors, supports OAuth safely, and keeps the 2FA s
   assert.ok(completeTwoFactor.includes('Stay on the code step'), 'a wrong 2FA code must keep the code step open')
   assert.ok(page.includes('/^[a-f0-9]{64}$/i.test(reset)') && page.includes('window.history.replaceState'), 'reset tokens must be validated and removed from the address bar')
 })
+
+test('support ticket creation rolls the ticket back when its messages cannot be saved', () => {
+  const route = readFileSync(new URL('../src/app/api/support/tickets/route.ts', import.meta.url), 'utf8')
+  assert.ok(route.includes('const { error: messagesError } = await db.from(\'support_messages\').insert(['), 'the message insert result must be checked')
+  const rollback = route.slice(route.indexOf('if (messagesError)'), route.indexOf('Step 3'))
+  assert.ok(rollback.includes("from('support_tickets').delete().eq('id', ticket.id)"), 'a ticket without messages must be removed')
+  assert.ok(rollback.includes('status: 500'), 'the caller must be told the ticket was not created')
+})

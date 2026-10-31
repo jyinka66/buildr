@@ -331,7 +331,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Insert the customer message + ai reply.
-  await db.from('support_messages').insert([
+  const { error: messagesError } = await db.from('support_messages').insert([
     {
       ticket_id: ticket.id,
       role: 'customer',
@@ -351,6 +351,13 @@ export async function POST(req: NextRequest) {
       }),
     },
   ])
+
+  if (messagesError) {
+    // The Prisma transaction used to roll the ticket back with its messages. Do the same
+    // by hand so a ticket never exists with an empty conversation thread.
+    await db.from('support_tickets').delete().eq('id', ticket.id)
+    return NextResponse.json({ error: 'ticket_create_failed' }, { status: 500 })
+  }
 
   // ── Step 3: Notification + usage tracking ─────────────────────────────────
   try {
