@@ -363,42 +363,6 @@ export const api = {
 
   // ----- God Mode (autonomous agent) -----
 
-  async createGodModeGoal(body: { goal: string; timeframeHours?: number }): Promise<{
-    ok: boolean; goalId: string; projectId: string; status: string
-    summary: string; taskGraph: Record<string, unknown>[]
-    deliverables: string[]; successCriteria: string[]
-    filesGenerated: number; message: string
-  }> {
-    const res = await fetch('/api/god-mode', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    return json(res)
-  },
-
-  async listGodModeGoals(): Promise<{
-    goals: {
-      id: string; goal: string; timeframeHours: number; status: string
-      currentTask: string | null; resultSummary: string
-      projectId: string | null
-      progress: { completedTasks: number; totalTasks: number }
-      taskCount: number; createdAt: string
-    }[]
-  }> {
-    const res = await fetch('/api/god-mode', { cache: 'no-store' })
-    return json(res)
-  },
-
-  async getGodModeStatus(goalId: string): Promise<{
-    goal: Record<string, unknown>
-    taskGraph: Record<string, unknown>[]
-    progress: Record<string, unknown>
-  }> {
-    const res = await fetch(`/api/god-mode/${goalId}/status`, { cache: 'no-store' })
-    return json(res)
-  },
-
   // ----- Billing & Subscriptions -----
 
   async getPlans(): Promise<{

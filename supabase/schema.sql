@@ -947,3 +947,8 @@ create table if not exists public.ai_chats (
 create index if not exists idx_ai_chats_user_updated on public.ai_chats(user_id, updated_at desc);
 alter table public.ai_chats enable row level security;
 revoke all privileges on table public.ai_chats from anon, authenticated;
+
+-- god_mode_goals runner lease (mirrors migrations/20261031010000_god_mode_runner.sql)
+alter table public.god_mode_goals add column if not exists lease_until timestamptz;
+create index if not exists idx_godmode_running on public.god_mode_goals(status, lease_until)
+  where status = 'running';
