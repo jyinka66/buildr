@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireSessionUser } from '@/lib/session'
+import { replaceProjectFiles } from '@/lib/project-files'
 
 export async function POST(
   req: NextRequest,
@@ -69,18 +70,17 @@ export async function POST(
 
   const files = snapshot.files as { path: string; content: string; language: string }[]
 
-  // Replace the project's files with the snapshot.
-  await db.from('project_files').delete().eq('project_id', id)
-  if (files.length) {
-    await db.from('project_files').insert(
-      files.map((f) => ({
-        project_id: id,
-        path: f.path,
-        content: f.content,
-        language: f.language,
-        generated: true,
-      })),
+  // Replace the project's files with the snapshot. Upserts first and only then removes
+  // paths that are not in the snapshot, so a failure cannot leave the project empty.
+  try {
+    await replaceProjectFiles(
+      db,
+      id,
+      files.map((f) => ({ path: f.path, content: f.content, language: f.language, generated: true })),
     )
+  } catch (err) {
+    console.error('[Buildr] rewind failed to restore files:', err instanceof Error ? err.message : err)
+    return NextResponse.json({ error: 'rewind_failed' }, { status: 500 })
   }
 
   await db.from('generations').insert({

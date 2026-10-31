@@ -13,6 +13,7 @@ import { db } from '@/lib/db'
 import { complete, type ChatMessage } from '@/lib/llm/router'
 import { buildScaffold, type ScaffoldInput } from '@/lib/generator/templates'
 import { applyIntegrations } from '@/lib/generator/integrations'
+import { replaceProjectFiles } from '@/lib/project-files'
 import type {
   DbConfig,
   FileOp,
@@ -279,8 +280,7 @@ export async function generateInitialProject(
   for (const f of llmFiles) merged.set(f.path, f)
 
   // 6. Persist all files to the DB + record the generation.
-  // Replace the previous file tree, then bulk-insert the new one.
-  // (Replaces Prisma $transaction with sequential awaits.)
+  // Replace the previous file tree with the new one.
   const files = Array.from(merged.values())
   const fileOps: FileOp[] = files.map((f) => ({
     path: f.path,
@@ -288,18 +288,18 @@ export async function generateInitialProject(
     language: f.language,
   }))
 
-  await db.from('project_files').delete().eq('project_id', projectId)
-  if (files.length) {
-    await db.from('project_files').insert(
-      files.map((f) => ({
-        project_id: projectId,
-        path: f.path,
-        content: f.content,
-        language: f.language,
-        generated: !scaffold.some((s) => s.path === f.path),
-      })),
-    )
-  }
+  // Upsert first, then drop only stale paths, so a failed write can never leave the
+  // project with no files (see src/lib/project-files.ts).
+  await replaceProjectFiles(
+    db,
+    projectId,
+    files.map((f) => ({
+      path: f.path,
+      content: f.content,
+      language: f.language,
+      generated: !scaffold.some((s) => s.path === f.path),
+    })),
+  )
 
   const assistantMessage =
     llmFiles.length > 0
