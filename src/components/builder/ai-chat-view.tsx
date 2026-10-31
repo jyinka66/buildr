@@ -429,14 +429,14 @@ export default function AiChatView() {
   )
 
   return (
-    <div className="mx-auto flex min-h-[calc(100dvh-3.5rem)] w-full max-w-5xl">
+    <div className="flex min-h-[calc(100dvh-3.5rem)] w-full">
       {showHistory ? (
         <aside className="hidden w-64 shrink-0 border-r border-border md:block">
           <div className="sticky top-0 h-[calc(100dvh-3.5rem)]">{historyList}</div>
         </aside>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col px-4">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-1 flex-col px-4">
         <div className="flex items-center gap-2 py-4">
           <Sparkles className="h-4 w-4 text-emerald-600" />
           <h1 className="text-sm font-semibold">AI Chat</h1>
