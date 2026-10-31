@@ -146,10 +146,18 @@ function IntegrationIcon({
 export function NewProjectDialog({
   open,
   onOpenChange,
+  initialName = '',
+  initialPrompt = '',
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  // Optional starting values (for example a plan worked out in AI Chat). They
+  // are read when the dialog opens; the user can still edit both fields.
+  initialName?: string
+  initialPrompt?: string
 }) {
+  const seedRef = React.useRef({ name: initialName, prompt: initialPrompt })
+  seedRef.current = { name: initialName, prompt: initialPrompt }
   const providers = useBuilder((s) => s.providers)
   const integrations = useBuilder((s) => s.integrations)
   const createProject = useBuilder((s) => s.createProject)
@@ -169,8 +177,8 @@ export function NewProjectDialog({
   // Reset form whenever the dialog opens (not on close, to avoid flicker).
   React.useEffect(() => {
     if (!open) return
-    setName('')
-    setPrompt('')
+    setName(seedRef.current.name)
+    setPrompt(seedRef.current.prompt)
     setStack('nextjs')
     setStyling('tailwind')
     setDbEngine('sqlite')

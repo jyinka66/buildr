@@ -66,3 +66,36 @@ export function isMissingTableError(error: { code?: string; message?: string } |
   const msg = (error.message ?? '').toLowerCase()
   return msg.includes('does not exist') || msg.includes('could not find the table')
 }
+
+// Seed for the New project dialog from a conversation planned in AI Chat: a
+// short name and a prompt that carries the agreed plan. The most recent
+// messages are kept when the conversation is long; reasoning text is left out.
+export const PROJECT_PROMPT_MAX_CHARS = 6_000
+const PROJECT_MESSAGE_MAX_CHARS = 2_500
+const PROJECT_NAME_MAX_CHARS = 40
+const PROJECT_PROMPT_HEADER =
+  'Build the app we planned in this conversation. Follow the requirements and decisions agreed below.\n\nConversation:\n'
+
+export function buildProjectSeed(messages: StoredChatMessage[]): { name: string; prompt: string } {
+  const usable = messages.filter((m) => m.content.trim())
+  const firstUser = usable.find((m) => m.role === 'user')
+  const flat = firstUser ? firstUser.content.replace(/\s+/g, ' ').trim() : ''
+  const name = flat
+    ? flat.length > PROJECT_NAME_MAX_CHARS
+      ? `${flat.slice(0, PROJECT_NAME_MAX_CHARS - 3).trimEnd()}...`
+      : flat
+    : 'My app'
+
+  const budget = PROJECT_PROMPT_MAX_CHARS - PROJECT_PROMPT_HEADER.length
+  const parts: string[] = []
+  let used = 0
+  for (let i = usable.length - 1; i >= 0; i--) {
+    const m = usable[i]
+    const text = m.content.trim().slice(0, PROJECT_MESSAGE_MAX_CHARS)
+    const part = `${m.role === 'user' ? 'User' : 'Assistant'}: ${text}`
+    if (used + part.length + 2 > budget) break
+    parts.unshift(part)
+    used += part.length + 2
+  }
+  return { name, prompt: parts.length ? PROJECT_PROMPT_HEADER + parts.join('\n\n') : '' }
+}

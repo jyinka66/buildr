@@ -116,3 +116,45 @@ test('the migration creates a user-scoped, locked-down ai_chats table', () => {
   assert.match(sql, /enable row level security/)
   assert.match(sql, /revoke all privileges on table public\.ai_chats from anon, authenticated/)
 })
+
+test('buildProjectSeed names the project from the first question and carries the plan', async () => {
+  const { buildProjectSeed, PROJECT_PROMPT_MAX_CHARS } = await import('../src/lib/chat-history.ts')
+  const empty = buildProjectSeed([])
+  assert.deepEqual(empty, { name: 'My app', prompt: '' })
+
+  const seed = buildProjectSeed([
+    { id: '1', role: 'user', content: 'Plan a booking app\nfor tailors in Lagos with payments' },
+    { id: '2', role: 'assistant', content: 'Pages: home, booking, admin.', thinking: 'secret reasoning' },
+  ])
+  assert.ok(seed.name.length <= 40)
+  assert.match(seed.name, /^Plan a booking app/)
+  assert.match(seed.prompt, /^Build the app we planned/)
+  assert.match(seed.prompt, /User: Plan a booking app/)
+  assert.match(seed.prompt, /Assistant: Pages: home, booking, admin\./)
+  assert.doesNotMatch(seed.prompt, /secret reasoning/)
+})
+
+test('buildProjectSeed keeps the most recent messages within the prompt budget', async () => {
+  const { buildProjectSeed, PROJECT_PROMPT_MAX_CHARS } = await import('../src/lib/chat-history.ts')
+  const msgs = Array.from({ length: 12 }, (_, i) => ({
+    id: String(i),
+    role: i % 2 ? 'assistant' : 'user',
+    content: `turn ${i} ` + 'x'.repeat(2000),
+  }))
+  const { prompt } = buildProjectSeed(msgs)
+  assert.ok(prompt.length <= PROJECT_PROMPT_MAX_CHARS)
+  assert.match(prompt, /turn 11 /)
+  assert.doesNotMatch(prompt, /turn 0 /)
+})
+
+test('Build this app reuses the New project dialog and leaves the builder untouched', () => {
+  const view = read('../src/components/builder/ai-chat-view.tsx')
+  assert.match(view, /<NewProjectDialog/)
+  assert.match(view, /buildProjectSeed/)
+  assert.doesNotMatch(view, /generate-stream|createProject\(/)
+  // The dialog's new props are optional, so the dashboard's use is unchanged.
+  const dialog = read('../src/components/builder/new-project-dialog.tsx')
+  assert.match(dialog, /initialName\?: string/)
+  assert.match(dialog, /initialPrompt\?: string/)
+  assert.match(dialog, /initialName = ''/)
+})

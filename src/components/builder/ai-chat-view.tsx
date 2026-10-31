@@ -25,6 +25,7 @@ import {
   Square,
   Trash2,
   User,
+  Wand2,
 } from 'lucide-react'
 import { streamChat } from '@/lib/chat-client'
 import {
@@ -36,8 +37,9 @@ import {
   saveChat,
   type ChatSummary,
 } from '@/lib/chats-client'
-import type { StoredChatMessage } from '@/lib/chat-history'
+import { buildProjectSeed, type StoredChatMessage } from '@/lib/chat-history'
 import { useBuilder } from '@/lib/store'
+import { NewProjectDialog } from '@/components/builder/new-project-dialog'
 import { ThinkingBlock } from '@/components/builder/thinking-block'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -118,6 +120,7 @@ export default function AiChatView() {
   const [opening, setOpening] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [saveFailed, setSaveFailed] = React.useState(false)
+  const [buildOpen, setBuildOpen] = React.useState(false)
 
   const abortRef = React.useRef<AbortController | null>(null)
   const bottomRef = React.useRef<HTMLDivElement>(null)
@@ -361,6 +364,9 @@ export default function AiChatView() {
 
   const last = messages[messages.length - 1]
   const showHistory = mode === 'on'
+  // Offer to turn the plan into a project once there is an answer to build from.
+  const canBuild = !!session && !streaming && messages.some((m) => m.role === 'assistant' && m.content.trim())
+  const buildSeed = React.useMemo(() => (buildOpen ? buildProjectSeed(messages) : { name: '', prompt: '' }), [buildOpen, messages])
 
   const historyList = (
     <div className="flex h-full min-h-0 flex-col">
@@ -445,6 +451,17 @@ export default function AiChatView() {
                 aria-expanded={listOpen}
               >
                 <History className="h-3.5 w-3.5" /> History
+              </Button>
+            ) : null}
+            {canBuild ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 px-2.5 text-xs"
+                onClick={() => setBuildOpen(true)}
+                disabled={busy}
+              >
+                <Wand2 className="h-3.5 w-3.5" /> Build this app
               </Button>
             ) : null}
             <Button
@@ -620,6 +637,12 @@ export default function AiChatView() {
           </p>
         </div>
       </div>
+      <NewProjectDialog
+        open={buildOpen}
+        onOpenChange={setBuildOpen}
+        initialName={buildSeed.name}
+        initialPrompt={buildSeed.prompt}
+      />
     </div>
   )
 }
