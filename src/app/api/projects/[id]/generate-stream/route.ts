@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { completeStream, type ChatMessage } from '@/lib/llm/router'
 import { buildSystemPrompt } from '@/lib/llm/code-generator'
+import { buildEditPrompt } from '@/lib/llm/project-context'
 import { extractFilesFromText, guessLanguage } from '@/lib/llm/code-generator'
 import { parseDbConfig, parseIntegrations } from '@/lib/helpers'
 import { requireSessionUser } from '@/lib/session'
@@ -134,11 +135,6 @@ export async function POST(
       : JSON.stringify(project.db_config ?? '{}'),
   )
 
-  const fileSummary = existingFiles
-    .slice(0, 40)
-    .map((f) => `- ${f.path} (${Math.round(f.content.length / 1024)}KB)`)
-    .join('\n')
-
   const systemPrompt = buildSystemPrompt({
     stack,
     styling,
@@ -147,17 +143,8 @@ export async function POST(
     existingFiles: existingFiles.map((f) => ({ path: f.path })),
   })
 
-  const userPrompt = [
-    'EXISTING PROJECT FILES:',
-    fileSummary || '(none)',
-    '',
-    'USER REQUEST:',
-    message,
-    '',
-    'Return ONLY a JSON array of files to create or update. ' +
-      'For updates, return the FULL new content of the file. ' +
-      'Do not return unchanged files.',
-  ].join('\n')
+  // The model sees the current code of the relevant files, not just their names.
+  const userPrompt = buildEditPrompt(existingFiles, message)
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },

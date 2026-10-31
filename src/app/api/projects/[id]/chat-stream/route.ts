@@ -14,6 +14,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { checkLimit, releaseUsageReservation } from '@/lib/billing'
 import { buildChatSystemPrompt } from '@/lib/llm/chat-prompts'
 import { createChatSseResponse, jsonError } from '@/lib/llm/chat-sse'
+import { CHAT_CONTEXT_LIMITS, formatProjectContext, selectProjectContext } from '@/lib/llm/project-context'
 import type { ChatMessage } from '@/lib/llm/router'
 
 export const runtime = 'nodejs'
@@ -75,7 +76,7 @@ export async function POST(
   }
 
   const [{ data: fileRows }, { data: historyRows }] = await Promise.all([
-    db.from('project_files').select('path').eq('project_id', id).order('path', { ascending: true }),
+    db.from('project_files').select('path, content').eq('project_id', id).order('path', { ascending: true }),
     db
       .from('generations')
       .select('role, content')
@@ -101,6 +102,13 @@ export async function POST(
           stack: String(project.stack ?? ''),
           styling: String(project.styling ?? ''),
           files: (fileRows ?? []).map((f: { path: string }) => f.path),
+          code: formatProjectContext(
+            selectProjectContext(
+              (fileRows ?? []).map((f: { path: string; content: string | null }) => ({ path: f.path, content: f.content ?? '' })),
+              message,
+              CHAT_CONTEXT_LIMITS,
+            ),
+          ),
         },
         allowBuildHandoff,
       ),

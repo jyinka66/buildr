@@ -32,6 +32,8 @@ export interface ProjectChatContext {
   stack: string
   styling: string
   files: string[]
+  /** Current code of the most relevant files, already formatted (see project-context.ts). */
+  code?: string
 }
 
 export function buildChatSystemPrompt(project?: ProjectChatContext | null, allowBuild = true): string {
@@ -54,6 +56,16 @@ export function buildChatSystemPrompt(project?: ProjectChatContext | null, allow
     '',
     'You can discuss, explain, and plan changes to this project in conversation.',
   ]
+
+  if (project.code) {
+    lines.push(
+      '',
+      'Current code of the most relevant files (this is the real source; base your answers about the app on it):',
+      project.code,
+      '',
+      'If you need a file whose content is not shown above, say so and ask the user to paste it. Never guess what it contains.',
+    )
+  }
 
   if (allowBuild) {
     lines.push(

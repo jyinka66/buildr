@@ -14,6 +14,7 @@ import { complete, type ChatMessage } from '@/lib/llm/router'
 import { buildScaffold, type ScaffoldInput } from '@/lib/generator/templates'
 import { applyIntegrations } from '@/lib/generator/integrations'
 import { replaceProjectFiles } from '@/lib/project-files'
+import { buildEditPrompt } from '@/lib/llm/project-context'
 import type {
   DbConfig,
   FileOp,
@@ -391,11 +392,6 @@ export async function generateIncremental(
 ): Promise<GenerationResult> {
   const { projectId, message, stack, styling, integrations, dbConfig, history, existingFiles, overrideProvider } = input
 
-  const fileSummary = existingFiles
-    .slice(0, 40)
-    .map((f) => `- ${f.path} (${Math.round(f.content.length / 1024)}KB)`)
-    .join('\n')
-
   const systemPrompt = buildSystemPrompt({
     stack,
     styling,
@@ -404,17 +400,7 @@ export async function generateIncremental(
     existingFiles: existingFiles.map((f) => ({ path: f.path })),
   })
 
-  const userPrompt = [
-    'EXISTING PROJECT FILES:',
-    fileSummary || '(none)',
-    '',
-    'USER REQUEST:',
-    message,
-    '',
-    'Return ONLY a JSON array of files to create or update. ' +
-      'For updates, return the FULL new content of the file. ' +
-      'Do not return unchanged files.',
-  ].join('\n')
+  const userPrompt = buildEditPrompt(existingFiles, message)
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
