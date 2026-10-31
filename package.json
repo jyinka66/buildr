@@ -8,7 +8,7 @@
     "start": "node .next/standalone/server.js",
     "lint": "eslint .",
     "db:reset": "prisma migrate reset",
-    "test:security": "node --experimental-strip-types --test tests/security-smoke.mjs tests/llm-routing.test.mjs tests/chat-stream.test.mjs",
+    "test:security": "node --experimental-strip-types --test tests/security-smoke.mjs tests/llm-routing.test.mjs tests/chat-stream.test.mjs tests/chat-history.test.mjs",
     "test:sandbox": "node --experimental-strip-types --test tests/sandbox-smoke.mjs tests/sandbox-integration.mjs",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:security && npm run test:sandbox && npm run test:deployment",

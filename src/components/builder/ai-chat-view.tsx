@@ -4,13 +4,39 @@
 // ------------------------------------------------------------------
 // Ask anything, brainstorm, or plan an app before creating it. Replies stream
 // live with the model's reasoning shown in a collapsible "Thinking" block.
-// The conversation lives in this browser (localStorage, per user) and is sent
-// with each request; nothing here touches project data or builds code.
+//
+// Conversations are saved to the user's account (/api/chats) and listed in a
+// history panel. If saving to the account is not available (the ai_chats
+// table has not been created yet, or the request fails), the chat keeps
+// working and falls back to this browser's localStorage, as before.
+// Nothing here touches project data or builds code.
 
 import * as React from 'react'
 import ReactMarkdown from 'react-markdown'
-import { AlertTriangle, Bot, Plus, Send, Sparkles, Square, User } from 'lucide-react'
+import {
+  AlertTriangle,
+  Bot,
+  History,
+  MessageSquare,
+  Pencil,
+  Plus,
+  Send,
+  Sparkles,
+  Square,
+  Trash2,
+  User,
+} from 'lucide-react'
 import { streamChat } from '@/lib/chat-client'
+import {
+  createChat,
+  deleteChat,
+  listChats,
+  loadChat,
+  renameChat,
+  saveChat,
+  type ChatSummary,
+} from '@/lib/chats-client'
+import type { StoredChatMessage } from '@/lib/chat-history'
 import { useBuilder } from '@/lib/store'
 import { ThinkingBlock } from '@/components/builder/thinking-block'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -18,13 +44,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
-interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  thinking?: string
-  thinkingMs?: number
-}
+type ChatMessage = StoredChatMessage
 
 const SUGGESTIONS = [
   'Help me plan a SaaS app for freelancers: features, pages and data',
@@ -39,22 +59,23 @@ function storageKey(userKey: string): string {
   return `buildr:ai-chat:v1:${userKey}`
 }
 
-function loadMessages(userKey: string): ChatMessage[] {
+function isChatMessage(m: unknown): m is ChatMessage {
+  const x = m as Partial<ChatMessage> | null
+  return !!x && (x.role === 'user' || x.role === 'assistant') && typeof x.content === 'string' && typeof x.id === 'string'
+}
+
+function loadLocalMessages(userKey: string): ChatMessage[] {
   try {
     const raw = window.localStorage.getItem(storageKey(userKey))
     if (!raw) return []
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(
-      (m): m is ChatMessage =>
-        m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && typeof m.id === 'string',
-    )
+    return Array.isArray(parsed) ? parsed.filter(isChatMessage) : []
   } catch {
     return []
   }
 }
 
-function saveMessages(userKey: string, messages: ChatMessage[]): void {
+function saveLocalMessages(userKey: string, messages: ChatMessage[]): void {
   try {
     window.localStorage.setItem(storageKey(userKey), JSON.stringify(messages.slice(-MAX_STORED_MESSAGES)))
   } catch {
@@ -62,8 +83,20 @@ function saveMessages(userKey: string, messages: ChatMessage[]): void {
   }
 }
 
+function clearLocalMessages(userKey: string): void {
+  try {
+    window.localStorage.removeItem(storageKey(userKey))
+  } catch {
+    /* ignore */
+  }
+}
+
 let idCounter = 0
 const newId = () => `m-${Date.now()}-${idCounter++}`
+
+// 'checking' = asking the server; 'on' = saving to the account;
+// 'off' = browser-only fallback.
+type HistoryMode = 'checking' | 'on' | 'off'
 
 export default function AiChatView() {
   const session = useBuilder((s) => s.session)
@@ -77,19 +110,126 @@ export default function AiChatView() {
   const [input, setInput] = React.useState('')
   const [streaming, setStreaming] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+
+  const [mode, setMode] = React.useState<HistoryMode>('checking')
+  const [chats, setChats] = React.useState<ChatSummary[]>([])
+  const [activeId, setActiveId] = React.useState<string | null>(null)
+  const [listOpen, setListOpen] = React.useState(false)
+  const [opening, setOpening] = React.useState(false)
+  const [saving, setSaving] = React.useState(false)
+  const [saveFailed, setSaveFailed] = React.useState(false)
+
   const abortRef = React.useRef<AbortController | null>(null)
   const bottomRef = React.useRef<HTMLDivElement>(null)
+  // True once this view changed the conversation, so loading a saved chat is
+  // not written straight back.
+  const dirtyRef = React.useRef(false)
+  const activeIdRef = React.useRef<string | null>(null)
+  const modeRef = React.useRef<HistoryMode>('checking')
+  const saveQueueRef = React.useRef<Promise<void>>(Promise.resolve())
+  const pendingSavesRef = React.useRef(0)
+
+  const busy = streaming || saving || opening
+
+  const setActive = React.useCallback((id: string | null) => {
+    activeIdRef.current = id
+    setActiveId(id)
+  }, [])
+
+  const setHistoryMode = React.useCallback((m: HistoryMode) => {
+    modeRef.current = m
+    setMode(m)
+  }, [])
 
   // Load this user's saved conversation (again if the signed-in user changes).
   if (!loaded) {
     setLoadedFor(userKey)
-    setMessages(loadMessages(userKey))
+    setMessages(loadLocalMessages(userKey))
   }
+
+  // Find out whether account history is available and load the list. A chat
+  // left in this browser by an older version is moved into the account once.
+  React.useEffect(() => {
+    let cancelled = false
+    setHistoryMode('checking')
+    setChats([])
+    setActive(null)
+
+    void (async () => {
+      let list: ChatSummary[]
+      try {
+        list = await listChats()
+      } catch {
+        if (!cancelled) setHistoryMode('off')
+        return
+      }
+      if (cancelled) return
+      setChats(list)
+      setHistoryMode('on')
+
+      const local = loadLocalMessages(userKey)
+      if (local.length === 0) return
+      try {
+        const created = await createChat(local)
+        clearLocalMessages(userKey)
+        if (cancelled) return
+        setChats((prev) => [created, ...prev.filter((c) => c.id !== created.id)])
+        // Show it as the open chat unless the user already started something.
+        if (!dirtyRef.current && activeIdRef.current === null) setActive(created.id)
+      } catch {
+        /* keep the local copy; it is retried on the next visit */
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [userKey, setActive, setHistoryMode])
+
+  const persist = React.useCallback(
+    (msgs: ChatMessage[]) => {
+      if (msgs.length === 0) return
+      if (modeRef.current !== 'on') {
+        saveLocalMessages(userKey, msgs)
+        return
+      }
+      pendingSavesRef.current += 1
+      setSaving(true)
+      saveQueueRef.current = saveQueueRef.current.then(async () => {
+        try {
+          const id = activeIdRef.current
+          if (!id) {
+            const created = await createChat(msgs)
+            setActive(created.id)
+            setChats((prev) => [created, ...prev.filter((c) => c.id !== created.id)])
+          } else {
+            const saved = await saveChat(id, msgs)
+            setChats((prev) =>
+              prev
+                .map((c) => (c.id === id ? { ...c, title: saved.title, updatedAt: saved.updatedAt } : c))
+                .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+            )
+          }
+          setSaveFailed(false)
+        } catch {
+          // Keep the conversation recoverable and tell the user.
+          saveLocalMessages(userKey, msgs)
+          setSaveFailed(true)
+        } finally {
+          pendingSavesRef.current -= 1
+          if (pendingSavesRef.current === 0) setSaving(false)
+        }
+      })
+    },
+    [userKey, setActive],
+  )
 
   // Save when a reply finishes (not on every streamed token).
   React.useEffect(() => {
-    if (loaded && !streaming) saveMessages(userKey, messages)
-  }, [messages, streaming, loaded, userKey])
+    if (!loaded || streaming || !dirtyRef.current) return
+    dirtyRef.current = false
+    persist(messages)
+  }, [messages, streaming, loaded, persist])
 
   React.useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' })
@@ -106,6 +246,7 @@ export default function AiChatView() {
     async (text: string, history: ChatMessage[]) => {
       const userMsg: ChatMessage = { id: newId(), role: 'user', content: text }
       const botMsg: ChatMessage = { id: newId(), role: 'assistant', content: '' }
+      dirtyRef.current = true
       setMessages([...history, userMsg, botMsg])
       setError(null)
       setStreaming(true)
@@ -145,7 +286,7 @@ export default function AiChatView() {
 
   const send = (value: string) => {
     const text = value.trim()
-    if (!text || streaming) return
+    if (!text || streaming || opening) return
     setInput('')
     void ask(text, messages)
   }
@@ -159,176 +300,325 @@ export default function AiChatView() {
   }
 
   const newChat = () => {
+    if (saving || opening) return
     abortRef.current?.abort()
+    dirtyRef.current = false
     setMessages([])
     setError(null)
     setStreaming(false)
+    setActive(null)
+    setListOpen(false)
+    if (modeRef.current !== 'on') clearLocalMessages(userKey)
+  }
+
+  const openChat = async (id: string) => {
+    if (busy || id === activeIdRef.current) {
+      setListOpen(false)
+      return
+    }
+    setOpening(true)
+    setError(null)
     try {
-      window.localStorage.removeItem(storageKey(userKey))
+      const chat = await loadChat(id)
+      dirtyRef.current = false
+      setMessages(chat.messages.filter(isChatMessage))
+      setActive(chat.id)
+      setListOpen(false)
+    } catch (err) {
+      setError(err instanceof Error && err.message ? `Could not open that chat (${err.message})` : 'Could not open that chat')
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  const removeChat = async (chat: ChatSummary) => {
+    if (busy) return
+    if (!window.confirm(`Delete "${chat.title}"? This cannot be undone.`)) return
+    try {
+      await deleteChat(chat.id)
+      setChats((prev) => prev.filter((c) => c.id !== chat.id))
+      if (activeIdRef.current === chat.id) {
+        dirtyRef.current = false
+        setMessages([])
+        setActive(null)
+      }
     } catch {
-      /* ignore */
+      setError('Could not delete that chat. Please try again.')
+    }
+  }
+
+  const rename = async (chat: ChatSummary) => {
+    if (busy) return
+    const next = window.prompt('Rename chat', chat.title)?.trim()
+    if (!next || next === chat.title) return
+    try {
+      const saved = await renameChat(chat.id, next)
+      setChats((prev) => prev.map((c) => (c.id === chat.id ? { ...c, title: saved.title } : c)))
+    } catch {
+      setError('Could not rename that chat. Please try again.')
     }
   }
 
   const last = messages[messages.length - 1]
+  const showHistory = mode === 'on'
+
+  const historyList = (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between px-3 py-3">
+        <span className="text-xs font-medium text-muted-foreground">Your chats</span>
+        <span className="text-[11px] text-muted-foreground">{chats.length}</span>
+      </div>
+      <div className="flex-1 overflow-y-auto px-2 pb-3">
+        {chats.length === 0 ? (
+          <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+            Your saved conversations will show up here.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-0.5">
+            {chats.map((c) => (
+              <li key={c.id} className="group relative">
+                <button
+                  type="button"
+                  onClick={() => void openChat(c.id)}
+                  disabled={busy}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-md px-2 py-2 pr-16 text-left text-xs transition-colors hover:bg-muted disabled:opacity-60',
+                    c.id === activeId && 'bg-muted font-medium',
+                  )}
+                  title={c.title}
+                >
+                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="truncate">{c.title}</span>
+                </button>
+                <div className="absolute top-1/2 right-1 flex -translate-y-1/2 gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => void rename(c)}
+                    disabled={busy}
+                    aria-label={`Rename ${c.title}`}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-destructive hover:text-destructive"
+                    onClick={() => void removeChat(c)}
+                    disabled={busy}
+                    aria-label={`Delete ${c.title}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
 
   return (
-    <div className="mx-auto flex min-h-[calc(100dvh-3.5rem)] w-full max-w-3xl flex-col px-4">
-      <div className="flex items-center gap-2 py-4">
-        <Sparkles className="h-4 w-4 text-emerald-600" />
-        <h1 className="text-sm font-semibold">AI Chat</h1>
-        <span className="text-xs text-muted-foreground">Ask anything, plan, think it through</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto h-8 gap-1.5 px-2.5 text-xs"
-          onClick={newChat}
-          disabled={messages.length === 0 && !streaming}
-        >
-          <Plus className="h-3.5 w-3.5" /> New chat
-        </Button>
-      </div>
+    <div className="mx-auto flex min-h-[calc(100dvh-3.5rem)] w-full max-w-5xl">
+      {showHistory ? (
+        <aside className="hidden w-64 shrink-0 border-r border-border md:block">
+          <div className="sticky top-0 h-[calc(100dvh-3.5rem)]">{historyList}</div>
+        </aside>
+      ) : null}
 
-      <div className="flex flex-1 flex-col gap-4 pb-4">
-        {messages.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 py-10 text-center">
-            <div className="grid h-11 w-11 place-items-center rounded-full bg-emerald-600/10 text-emerald-600">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-base font-medium">What are you working on?</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Ask a question, think through an idea, or plan an app before you build it.
-              </p>
-            </div>
-            <div className="flex max-w-xl flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => send(s)}
-                  className="rounded-full border border-border bg-muted/40 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-emerald-500/40 hover:text-foreground"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
+      <div className="flex min-w-0 flex-1 flex-col px-4">
+        <div className="flex items-center gap-2 py-4">
+          <Sparkles className="h-4 w-4 text-emerald-600" />
+          <h1 className="text-sm font-semibold">AI Chat</h1>
+          <span className="hidden text-xs text-muted-foreground sm:inline">Ask anything, plan, think it through</span>
+          <div className="ml-auto flex items-center gap-1">
+            {showHistory ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 px-2.5 text-xs md:hidden"
+                onClick={() => setListOpen((v) => !v)}
+                aria-expanded={listOpen}
+              >
+                <History className="h-3.5 w-3.5" /> History
+              </Button>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 px-2.5 text-xs"
+              onClick={newChat}
+              disabled={(messages.length === 0 && !streaming) || saving || opening}
+            >
+              <Plus className="h-3.5 w-3.5" /> New chat
+            </Button>
           </div>
-        ) : (
-          messages.map((m) => {
-            const isUser = m.role === 'user'
-            const isLast = m.id === last?.id
-            // Waiting: this reply is streaming and has produced no answer text yet.
-            const thinkingNow = streaming && isLast && !isUser && !m.content
-            return (
-              <div key={m.id} className={cn('flex w-full gap-2', isUser ? 'justify-end' : 'justify-start')}>
-                {!isUser ? (
-                  <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-                    <Bot className={cn('h-4 w-4', thinkingNow && 'animate-pulse')} />
-                  </div>
-                ) : null}
-                <div className={cn('flex max-w-[88%] flex-col gap-1.5', isUser ? 'items-end' : 'items-start')}>
-                  {!isUser && m.thinking ? (
-                    <div className="w-full rounded-lg bg-muted/60 px-3 py-2">
-                      <ThinkingBlock text={m.thinking} active={thinkingNow} ms={m.thinkingMs} />
+        </div>
+
+        {showHistory && listOpen ? (
+          <div className="mb-3 h-64 overflow-hidden rounded-lg border border-border md:hidden">{historyList}</div>
+        ) : null}
+
+        <div className="flex flex-1 flex-col gap-4 pb-4">
+          {opening ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Opening chat…</p>
+          ) : messages.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 py-10 text-center">
+              <div className="grid h-11 w-11 place-items-center rounded-full bg-emerald-600/10 text-emerald-600">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-base font-medium">What are you working on?</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Ask a question, think through an idea, or plan an app before you build it.
+                </p>
+              </div>
+              <div className="flex max-w-xl flex-wrap justify-center gap-2">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => send(s)}
+                    className="rounded-full border border-border bg-muted/40 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-emerald-500/40 hover:text-foreground"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            messages.map((m) => {
+              const isUser = m.role === 'user'
+              const isLast = m.id === last?.id
+              // Waiting: this reply is streaming and has produced no answer text yet.
+              const thinkingNow = streaming && isLast && !isUser && !m.content
+              return (
+                <div key={m.id} className={cn('flex w-full gap-2', isUser ? 'justify-end' : 'justify-start')}>
+                  {!isUser ? (
+                    <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                      <Bot className={cn('h-4 w-4', thinkingNow && 'animate-pulse')} />
                     </div>
                   ) : null}
-                  {thinkingNow && !m.thinking ? (
-                    <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.2s]" />
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.1s]" />
-                        <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500" />
-                        <span className="ml-1.5">thinking…</span>
-                      </span>
-                    </div>
-                  ) : m.content ? (
-                    <div
-                      className={cn(
-                        'rounded-lg px-3 py-2 text-sm leading-relaxed',
-                        isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground',
-                      )}
-                    >
-                      {isUser ? (
-                        <p className="whitespace-pre-wrap break-words">{m.content}</p>
-                      ) : (
-                        <div className="prose prose-sm dark:prose-invert max-w-none break-words [&>pre]:rounded-md [&>pre]:bg-zinc-950 [&>pre]:p-3 [&_code]:text-xs">
-                          <ReactMarkdown>{m.content}</ReactMarkdown>
-                          {streaming && isLast ? (
-                            <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-emerald-500 align-middle" />
-                          ) : null}
-                        </div>
-                      )}
+                  <div className={cn('flex max-w-[88%] flex-col gap-1.5', isUser ? 'items-end' : 'items-start')}>
+                    {!isUser && m.thinking ? (
+                      <div className="w-full rounded-lg bg-muted/60 px-3 py-2">
+                        <ThinkingBlock text={m.thinking} active={thinkingNow} ms={m.thinkingMs} />
+                      </div>
+                    ) : null}
+                    {thinkingNow && !m.thinking ? (
+                      <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.2s]" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500 [animation-delay:-0.1s]" />
+                          <span className="h-2 w-2 animate-bounce rounded-full bg-emerald-500" />
+                          <span className="ml-1.5">thinking…</span>
+                        </span>
+                      </div>
+                    ) : m.content ? (
+                      <div
+                        className={cn(
+                          'rounded-lg px-3 py-2 text-sm leading-relaxed',
+                          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground',
+                        )}
+                      >
+                        {isUser ? (
+                          <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                        ) : (
+                          <div className="prose prose-sm dark:prose-invert max-w-none break-words [&>pre]:rounded-md [&>pre]:bg-zinc-950 [&>pre]:p-3 [&_code]:text-xs">
+                            <ReactMarkdown>{m.content}</ReactMarkdown>
+                            {streaming && isLast ? (
+                              <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-emerald-500 align-middle" />
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                  {isUser ? (
+                    <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary/15 text-primary">
+                      <User className="h-4 w-4" />
                     </div>
                   ) : null}
                 </div>
-                {isUser ? (
-                  <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary/15 text-primary">
-                    <User className="h-4 w-4" />
-                  </div>
-                ) : null}
-              </div>
-            )
-          })
-        )}
-
-        {error ? (
-          <Alert variant="destructive" className="py-2">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertTitle className="text-xs">Something went wrong</AlertTitle>
-            <AlertDescription className="flex items-center justify-between gap-2 text-xs">
-              <span className="min-w-0 truncate">{error}</span>
-              <Button size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={retry}>
-                Retry
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        <div ref={bottomRef} />
-      </div>
-
-      <div className="sticky bottom-0 -mx-4 border-t border-border bg-background px-4 py-3">
-        <div className="relative">
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                send(input)
-              }
-            }}
-            placeholder="Ask anything…  (Enter to send · Shift+Enter for newline)"
-            disabled={streaming}
-            rows={2}
-            className="min-h-[2.75rem] resize-none pr-12 text-sm leading-relaxed"
-          />
-          {streaming ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className="absolute right-1.5 bottom-1.5 h-7 w-7"
-              onClick={() => abortRef.current?.abort()}
-              aria-label="Stop generating"
-            >
-              <Square className="h-3 w-3 fill-current" />
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="icon"
-              className="absolute right-1.5 bottom-1.5 h-7 w-7"
-              onClick={() => send(input)}
-              disabled={!input.trim()}
-              aria-label="Send message"
-            >
-              <Send className="h-3.5 w-3.5" />
-            </Button>
+              )
+            })
           )}
+
+          {error ? (
+            <Alert variant="destructive" className="py-2">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle className="text-xs">Something went wrong</AlertTitle>
+              <AlertDescription className="flex items-center justify-between gap-2 text-xs">
+                <span className="min-w-0 truncate">{error}</span>
+                {messages.some((m) => m.role === 'user') ? (
+                  <Button size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={retry}>
+                    Retry
+                  </Button>
+                ) : null}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {saveFailed ? (
+            <Alert className="py-2">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription className="text-xs">
+                This chat could not be saved to your account just now. It is kept in this browser and will save again after
+                your next message.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <div ref={bottomRef} />
         </div>
-        <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
-          This chat is saved in this browser. To build an app, open or create a project.
-        </p>
+
+        <div className="sticky bottom-0 -mx-4 border-t border-border bg-background px-4 py-3">
+          <div className="relative">
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  send(input)
+                }
+              }}
+              placeholder="Ask anything…  (Enter to send · Shift+Enter for newline)"
+              disabled={streaming || opening}
+              rows={2}
+              className="min-h-[2.75rem] resize-none pr-12 text-sm leading-relaxed"
+            />
+            {streaming ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className="absolute right-1.5 bottom-1.5 h-7 w-7"
+                onClick={() => abortRef.current?.abort()}
+                aria-label="Stop generating"
+              >
+                <Square className="h-3 w-3 fill-current" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="icon"
+                className="absolute right-1.5 bottom-1.5 h-7 w-7"
+                onClick={() => send(input)}
+                disabled={!input.trim() || streaming || opening}
+                aria-label="Send message"
+              >
+                <Send className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+          <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+            {mode === 'on'
+              ? 'Chats are saved to your account. To build an app, open or create a project.'
+              : 'This chat is saved in this browser. To build an app, open or create a project.'}
+          </p>
+        </div>
       </div>
     </div>
   )

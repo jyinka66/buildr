@@ -932,3 +932,18 @@ grant execute on function public.reserve_usage(text,text,integer,integer) to ser
 grant execute on function public.commit_usage_reservation(text,text,integer,integer,text,jsonb,uuid) to service_role;
 grant execute on function public.release_usage_reservation(text,uuid) to service_role;
 grant execute on function public.consume_rate_limit(text,integer,integer) to service_role;
+
+-- ai_chats (saved conversations for the no-project AI Chat) -----------------
+-- Mirrors migrations/20261031000000_add_ai_chats.sql.
+create table if not exists public.ai_chats (
+  id          text primary key default gen_random_uuid(),
+  user_id     text not null references public.users(id) on delete cascade,
+  title       text not null default 'New chat',
+  title_auto  boolean not null default true,
+  messages    jsonb not null default '[]',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists idx_ai_chats_user_updated on public.ai_chats(user_id, updated_at desc);
+alter table public.ai_chats enable row level security;
+revoke all privileges on table public.ai_chats from anon, authenticated;
